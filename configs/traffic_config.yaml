@@ -1,0 +1,48 @@
+# Traffic Generator Parameters — FlashBalanceAI
+# Source: IMPLEMENTATION_PLAN_PART1.md T2.1 / PRD §9.8–§9.9
+# These values define all experiment traffic scenarios.
+# Do NOT change scenario seeds after experiments begin (data leakage prevention).
+
+# --- Baseline traffic ---
+baseline_rps: 100              # Baseline request rate (requests per second)
+
+# --- Episode structure (steps at 100ms resolution) ---
+warmup_steps: 1200             # 2 minutes warm-up at baseline
+pre_burst_steps: 600           # 1 minute pre-announcement (3x baseline)
+spike_onset_steps: 100         # 10 seconds linear ramp to peak
+peak_steps: 3000               # 5 minutes at peak burst rate
+cooldown_steps: 3000           # 5 minutes exponential decay back to baseline
+# Total episode: 7900 steps ≈ 13 minutes at 100ms per step
+
+# --- Experiment scenarios ---
+# seed: 44 is the test seed for all scenarios (per ADR-001 D18)
+# train_episodes use seed 42; val_episodes use seed 43
+scenarios:
+  e1_baseline:
+    burst_multiplier: 1.0
+    noise_std_fraction: 0.05
+    seed: 44
+  e2_10x:
+    burst_multiplier: 10.0
+    noise_std_fraction: 0.10
+    seed: 44
+  e3_50x:
+    burst_multiplier: 50.0
+    noise_std_fraction: 0.10
+    seed: 44
+  e4_100x:
+    burst_multiplier: 100.0
+    noise_std_fraction: 0.10
+    seed: 44
+  e6_noisy:
+    burst_multiplier: 2.0
+    noise_std_fraction: 0.40
+    seed: 44
+  train_episodes:
+    burst_multiplier: 10.0
+    noise_std_fraction: 0.10
+    seed: 42
+  val_episodes:
+    burst_multiplier: 10.0
+    noise_std_fraction: 0.10
+    seed: 43

@@ -1,0 +1,40 @@
+# DQN Agent Hyperparameters — FlashBalanceAI
+# Source: IMPLEMENTATION_PLAN_PART1.md T3.2 / ADR-001 D2
+# Architecture must be identical to PPO for a fair comparison (same net_arch).
+# Environment version must be frozen at the same commit as PPO training.
+#
+# Reference: Mnih et al. (2015) DQN; Stable-Baselines3 v2.3.0.
+
+# --- Optimiser ---
+learning_rate: 0.0001          # Adam optimiser learning rate
+
+# --- Replay buffer ---
+buffer_size: 100000            # Experience replay buffer capacity
+learning_starts: 10000         # Steps before first gradient update
+batch_size: 64                 # Mini-batch sampled from replay buffer
+
+# --- DQN-specific ---
+gamma: 0.99                    # Discount factor
+target_update_interval: 1000   # Steps between target network hard updates
+train_freq: 4                  # Update network every N environment steps
+exploration_fraction: 0.15     # Fraction of training for ε-greedy exploration decay
+exploration_final_eps: 0.05    # Final ε value after exploration decay
+
+# --- Network architecture ---
+net_arch: [64, 64]             # Must match ppo_config.yaml for fair comparison
+
+# --- Training ---
+total_timesteps: 2000000       # Total environment steps (same as PPO)
+
+# --- Seeds (per ADR-001 D18) ---
+seed_train: 42                 # Must match PPO seed_train for identical environment
+# NOTE: Test seeds 127–141 must NOT be used here
+
+# --- Checkpointing ---
+checkpoint_freq: 100000
+eval_freq: 50000
+n_eval_episodes: 3
+
+# --- Save paths ---
+save_dir: "models/dqn"
+tensorboard_log: "models/dqn/tb_logs"
