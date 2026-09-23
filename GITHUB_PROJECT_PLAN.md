@@ -6,9 +6,8 @@
 **Team:** Devkanti Sarkar (24BIT0162) · Agrima Gupta (24BIT0253) · Mohar Gorai · [4th member]  
 **Branch Model:** `main` ← `develop` ← `feature/*` (already implemented — not redesigned here)  
 <<<<<<< HEAD
-**Document Version:** 1.1 | **Last Revised:** 2026-08-20 (cost-optimisation update — see ADR-002)
 =======
-**Document Version:** 1.0 | **Date:** 2026-08-20
+
 >>>>>>> origin/main
 
 ---
