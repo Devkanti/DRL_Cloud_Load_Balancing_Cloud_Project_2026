@@ -855,40 +855,45 @@ for name, agent in algorithms.items():
 
 **Duration:** 5–7 days | **[COSTS MONEY — read all cost notes carefully]**
 
+> **Cost optimisation revision (2026-08-20):** This phase reflects the revised low-cost architecture from PRD §12. Key changes: (1) API Gateway removed from primary data path — JMeter targets ALB DNS directly; (2) CloudFront removed entirely; (3) SageMaker demoted to optional fallback (T4.7); (4) custom CloudWatch metrics reduced to 8 (within free tier); (5) ALB must be deleted between experiment phases to avoid idle charges. Research methodology unchanged.
+
 ---
 
 ### AWS COST ANALYSIS AND FREE TIER VERIFICATION
 
-**⚠️ IMPORTANT:** The following is based on AWS pricing as of mid-2026 for us-east-1. Always verify at https://aws.amazon.com/pricing/ before spending.
+**⚠️ IMPORTANT:** Based on AWS pricing as of mid-2026 for us-east-1. Always verify at https://aws.amazon.com/pricing/ before spending.
 
-| Service | Free Tier / Student Allowance | Beyond Free Tier | Notes |
-|---------|------------------------------|------------------|-------|
-| EC2 t2.micro | 750 hrs/month for 12 months (new accounts) | $0.0116/hr | 5 instances × 8 hrs/day × 30 days = 1200 hrs → ~450 hrs beyond free tier ≈ **$5.22/month** |
-| ALB | NOT in free tier | $0.0225/hr + $0.008/LCU-hr | 8 hrs/day experiment → $0.18/day → **~$5/month for experiments** |
-| Lambda | 1M free requests/month, 400,000 GB-s compute | $0.20 per 1M req beyond | Well within free tier for our use |
-| CloudWatch | 10 custom metrics free, 5 alarms free | $0.30/metric/month beyond | We need ~20 custom metrics → ~$3/month beyond free |
-| S3 | 5 GB free | $0.023/GB/month | We use < 5 GB → **free** |
-| SageMaker ml.t2.medium | NOT in free tier | $0.046/hr | Train once, stop immediately → **$0.25–$0.50 total** |
-| API Gateway | 1M API calls/month free | $3.50/million | Well within free tier for experiments |
-| ASG | Free (pays EC2 only) | — | No additional cost |
-| DynamoDB | 25 GB free, 200M requests/month free | — | **Free** for our use |
+| Service | Free Tier | Beyond Free Tier | Notes |
+|---------|-----------|------------------|-------|
+| EC2 t2.micro | 750 hrs/month (new accounts) | $0.0116/hr | 5 instances stopped between sessions; active ~4 hrs/day × 14 exp days = 280 hrs ≈ **within free tier if new account** |
+| ALB | **NOT free tier** | $0.0225/hr + $0.008/LCU-hr | Active ~4 hrs/day × 14 days = 56 hrs → **~$1.30 + LCU** — **delete between experiment phases** |
+| Lambda | 1M requests/month free | $0.20/1M req beyond | < 100k invocations → **free** |
+| CloudWatch custom metrics | 10 metrics free | $0.30/metric/month beyond | **8 custom metrics → free tier** (reduced from ~20) |
+| CloudWatch alarms | 10 alarms free | $0.10/alarm/month beyond | 5 alarms used → **free** |
+| S3 | 5 GB free | $0.023/GB/month | ~2–3 GB total → **free** |
+| SageMaker ml.t2.medium | **NOT free tier** | $0.046/hr | Optional fallback only; ~$0.20–$0.50 if used once |
+| API Gateway | *(removed from primary path)* | — | JMeter → ALB DNS directly; API GW not provisioned |
+| ASG | Free (EC2 cost only) | — | No additional cost |
+| DynamoDB | 25 GB + 200M req/month free | — | **Free** |
 | SNS | 1M notifications free | — | **Free** |
 | IAM | Always free | — | **Free** |
-| CloudFront | 1 TB data transfer free/month | — | **Free** for dashboard |
+| CloudFront | *(removed from architecture)* | — | Not provisioned |
 
-**ESTIMATED TOTAL AWS COST FOR FULL EXPERIMENT CAMPAIGN:**
+**REVISED ESTIMATED TOTAL AWS COST FOR FULL EXPERIMENT CAMPAIGN:**
 
-| Scenario | Cost Estimate |
-|----------|--------------|
-| Conservative (4 hrs/day for 14 days) | $12–18 |
-| Realistic (6 hrs/day for 14 days) | $20–30 |
-| Maximum (all experiments, 8 hrs/day, 14 days) | $35–45 |
+| Scenario | Original Estimate | Revised Estimate |
+|----------|------------------|-----------------|
+| Conservative (4 hrs active/day, 14 days) | $12–18 | **$4–8** |
+| Realistic (6 hrs active/day, 14 days) | $20–30 | **$7–12** |
+| Maximum (8 hrs active/day, 14 days) | $35–45 | **$10–15** |
+
+> **This design aims to minimise AWS expenditure. It does not guarantee zero cost. ALB and EC2 will incur charges during active experiment windows. Do not leave resources running overnight.**
 
 **BILLING SAFEGUARDS (mandatory before starting Phase 4):**
-1. Set a CloudWatch billing alarm at $5 (warning) and $25 (hard limit email).
-2. Set AWS Budgets alert: Monthly cost > $20 → email all 4 team members.
-3. **ALWAYS stop EC2 instances and SageMaker notebook after each session.**
-4. Enable Cost Explorer to monitor daily spend.
+1. Set a CloudWatch billing alarm at **$5** (warning email) and **$20** (action email).
+2. Set AWS Budgets alert: Monthly cost > $15 → email all 4 team members immediately.
+3. **ALWAYS stop EC2 instances (desired=0, min=0) and delete ALB after each experiment session.**
+4. Enable Cost Explorer to monitor daily spend; check each morning during experiment phase.
 
 ---
 
@@ -1098,6 +1103,8 @@ aws ec2 delete-security-group --group-name FlashBalanceAI-Backend-SG
 
 **Objective:** Create ALB with target group pointing to backend EC2 instances.
 
+> **Cost discipline (revised 2026-08-20):** The ALB must be **deleted** (not just stopped) between experiment phases because AWS charges $0.0225/hr even when idle. Recreating it before each experiment session adds ~20 minutes of setup time but eliminates idle charges. Save the ALB ARN and Target Group ARN to `configs/aws_config.yaml` for quick recreation. The `src/aws/deploy.py` script must support idempotent ALB creation.
+
 **Steps:**
 1. Create ALB:
 ```bash
@@ -1107,7 +1114,7 @@ aws elbv2 create-load-balancer \
     --security-groups sg-ALB \
     --scheme internet-facing \
     --type application
-# Note the ALB ARN and DNS name
+# Save ALB ARN and DNS name to configs/aws_config.yaml
 ```
 2. Create target group:
 ```bash
@@ -1122,18 +1129,30 @@ aws elbv2 create-target-group \
 ```
 3. Register all 4 EC2 instances as targets.
 4. Create listener: HTTP:80 → forward to target group.
-5. Save ALB DNS name to `configs/aws_config.yaml` as `alb_dns`.
+5. Enable ALB access logs: `aws elbv2 modify-load-balancer-attributes --load-balancer-arn <ARN> --attributes Key=access_logs.s3.enabled,Value=true Key=access_logs.s3.bucket,Value=flashbalanceai-{ACCOUNT_ID} Key=access_logs.s3.prefix,Value=logs/alb`
+6. Save ALB DNS name to `configs/aws_config.yaml` as `alb_dns`.
+7. **Test:** JMeter targeting `http://{ALB_DNS}/product/1` directly (no API Gateway required).
 
-**How to delete:** `aws elbv2 delete-load-balancer --load-balancer-arn <ARN>` then `aws elbv2 delete-target-group --target-group-arn <ARN>`.
+**How to delete (run after every experiment session):**
+```bash
+aws elbv2 delete-load-balancer --load-balancer-arn <ARN>
+aws elbv2 delete-target-group --target-group-arn <ARN>
+# Also set ASG desired=0 to stop backend EC2 instances
+aws autoscaling update-auto-scaling-group \
+    --auto-scaling-group-name FlashBalanceAI-ASG \
+    --desired-capacity 0 --min-size 0
+```
 
-**⚠️ COST NOTE:** ALB is NOT free tier. Cost: ~$0.0225/hr + $0.008/LCU. For 8 hrs/day experiments: ~$0.18/day → **~$2.50 for 2-week experiment period**. Delete ALB when not running experiments to avoid idle charges.
+**⚠️ COST NOTE:** ALB is NOT free tier. $0.0225/hr fixed + LCU charges.
+- Active during experiments only: ~4 hrs/day × 14 experiment days = 56 hrs → **~$1.30 total fixed** (+ LCU ~$0.50 estimated).
+- If left running 24/7 for 30 days: ~$16.20 — **do not leave running overnight**.
 
-**Dependencies:** T4.4  
-**Tool:** AWS ALB, AWS CLI  
-**Output:** ALB DNS name, target group ARN  
-**Estimated Time:** 2 hours  
-**Acceptance Criteria:** `aws elbv2 describe-target-health --target-group-arn <ARN>` shows all 4 targets healthy. `curl http://{ALB_DNS}/product/1` returns 200.  
-**Costs Money?** **YES — $0.0225/hr fixed charge.** Delete immediately when not in use.
+**Dependencies:** T4.4
+**Tool:** AWS ALB, AWS CLI
+**Output:** ALB DNS name, target group ARN, access logs enabled
+**Estimated Time:** 2 hours
+**Acceptance Criteria:** `aws elbv2 describe-target-health --target-group-arn <ARN>` shows all 4 targets healthy. `curl http://{ALB_DNS}/product/1` returns 200. ALB access logs appearing in S3 within 5 minutes of first request.
+**Costs Money?** **YES — $0.0225/hr fixed charge.** Delete after every experiment session.
 
 ---
 
@@ -1163,11 +1182,15 @@ aws dynamodb create-table \
 
 ---
 
-### T4.7 — SageMaker Training (Optional Fallback) [COSTS MONEY]
+### T4.7 — SageMaker Training (Optional Fallback) [COSTS MONEY — USE ONLY IF LOCAL FAILS]
 
-**Objective:** Use SageMaker only if local training on laptop is insufficient (< 8 GB RAM, training taking > 24 hours).
+**Objective:** Use SageMaker only if local laptop training AND Google Colab both fail to produce a converged PPO model within the available time.
 
-**Decision rule:** Use SageMaker if and only if local training (T3.1) fails to converge within 8 hours or laptop RAM is insufficient.
+**Decision rule:** SageMaker is a last resort. Use it if and only if:
+- Local laptop training (T3.1) does not complete 2M steps within 8 hours, AND
+- Google Colab (free) is unavailable or produces numerical instability
+
+> **Preferred alternatives in order:** (1) Laptop CPU (~3–4 hrs for 2M steps), (2) Google Colab free GPU/TPU (~1–2 hrs), (3) SageMaker ml.t2.medium (~$0.20–$0.50). Do not provision SageMaker unless the team has explicitly confirmed both (1) and (2) are insufficient.
 
 **Steps (if needed):**
 1. Open SageMaker Console → Notebook Instances → Create notebook instance.

@@ -130,59 +130,60 @@ FlashBalanceAI is a two-stage system:
 
 ## 8. Detailed End-to-End Architecture
 
+> **Architecture revision (2026-08-20):** API Gateway removed from primary data path (JMeter targets ALB DNS directly). CloudFront removed. SageMaker demoted to optional fallback. See PRD §12.0 for rationale.
+
 ```
-                         ┌─────────────────────────────────────────────────┐
-                         │              AWS Cloud (us-east-1)              │
-                         │                                                 │
- Users (JMeter)          │  ┌─────────────┐    ┌──────────────────────┐  │
- flash-sale traffic ────▶│  │ API Gateway │───▶│  ALB (HTTP Listener) │  │
-                         │  └─────────────┘    └──────────┬───────────┘  │
-                         │                               │               │
-                         │  ┌────────────────────────────▼────────────┐  │
-                         │  │         PPO Inference Agent             │  │
-                         │  │   (Lambda / EC2 t2.micro endpoint)      │  │
-                         │  │  - Reads state from CloudWatch          │  │
-                         │  │  - Selects target backend instance      │  │
-                         │  │  - Executes ALB target group change     │  │
-                         │  └────────────┬────────────────────────────┘  │
-                         │               │ routes to                      │
-                         │  ┌────────────▼──────────────────────────┐    │
-                         │  │     EC2 Backend Pool (Auto Scaling)   │    │
-                         │  │  ┌──────────┐ ┌──────────┐ ┌──────┐  │    │
-                         │  │  │ Server-1 │ │ Server-2 │ │  ... │  │    │
-                         │  │  │ t2.micro │ │ t2.micro │ │      │  │    │
-                         │  │  └──────────┘ └──────────┘ └──────┘  │    │
-                         │  └───────────────────────────────────────┘    │
-                         │         │ metrics (CPU,latency,queue)         │
-                         │  ┌──────▼──────────────────────────────────┐  │
-                         │  │          Amazon CloudWatch              │  │
-                         │  │  - Custom metrics namespace             │  │
-                         │  │  - Alarms → Lambda → ASG scale-out     │  │
-                         │  │  - Dashboard                           │  │
-                         │  └─────────────────────────────────────────┘  │
-                         │                                                │
-                         │  ┌──────────────┐   ┌─────────────────────┐  │
-                         │  │ Amazon S3    │   │  SageMaker Notebook │  │
-                         │  │ model weights│   │  (Offline Training) │  │
-                         │  │ traffic logs │   │  ml.t2.medium       │  │
-                         │  └──────────────┘   └─────────────────────┘  │
-                         │                                                │
-                         │  ┌───────────────────┐                        │
-                         │  │    IAM Roles      │                        │
-                         │  │  least-privilege  │                        │
-                         │  └───────────────────┘                        │
-                         └────────────────────────────────────────────────┘
+                         ┌──────────────────────────────────────────────────┐
+                         │              AWS Cloud (us-east-1)               │
+                         │                                                  │
+ JMeter (local)          │  ┌──────────────────────────────────────────┐   │
+ flash-sale traffic ────▶│  │      ALB (HTTP:80, weighted TG)          │   │
+                         │  └───────────────────┬──────────────────────┘   │
+                         │                      │ routes to                │
+                         │  ┌───────────────────▼──────────────────────┐   │
+                         │  │        EC2 Backend Pool (ASG)            │   │
+                         │  │   server-0  server-1  server-2  server-3 │   │
+                         │  │   t2.micro  t2.micro  t2.micro  t2.micro │   │
+                         │  └───────────────────┬──────────────────────┘   │
+                         │                      │ metrics (30s)            │
+                         │  ┌───────────────────▼──────────────────────┐   │
+                         │  │  CloudWatch                              │   │
+                         │  │  CPUUtil (built-in) + 8 custom metrics   │   │
+                         │  │  Alarms → Lambda → ASG scale-out/in      │   │
+                         │  └──────┬────────────────────────┬──────────┘   │
+                         │         │ (every 30s)             │ (alarm)     │
+                         │  ┌──────▼────────────┐   ┌───────▼──────────┐  │
+                         │  │Lambda: State       │   │Lambda: Scaling   │  │
+                         │  │Collector           │   │Trigger           │  │
+                         │  │→ S3 current.json   │   │→ ASG desired cap │  │
+                         │  └──────┬─────────────┘   └──────────────────┘  │
+                         │         │ (every 30s)                           │
+                         │  ┌──────▼─────────────────────────────────────┐ │
+                         │  │Lambda: Inference Coordinator               │ │
+                         │  │  reads S3 state → POST /infer →            │ │
+                         │  │  EC2 inference server (t2.micro)           │ │
+                         │  │  → elbv2 update ALB weights                │ │
+                         │  │  → DynamoDB log                            │ │
+                         │  └────────────────────────────────────────────┘ │
+                         │                                                  │
+                         │  ┌──────────────┐   ┌────────────────────────┐  │
+                         │  │ Amazon S3    │   │ SageMaker (optional)   │  │
+                         │  │ models/      │   │ ml.t2.medium           │  │
+                         │  │ state/       │   │ fallback training only │  │
+                         │  │ results/     │   └────────────────────────┘  │
+                         │  └──────────────┘                               │
+                         └──────────────────────────────────────────────────┘
 ```
 
-**Data Flow:**
-1. JMeter (local) generates HTTP traffic following flash-sale burst profile → API Gateway → ALB
-2. ALB forwards to PPO inference endpoint (Lambda or EC2)
-3. PPO endpoint queries CloudWatch for current state (last 10s sliding window)
-4. PPO selects backend instance index → ALB routes request to target instance
-5. Backend instance processes request → returns response → ALB → JMeter (records latency)
-6. CloudWatch agent on each EC2 instance publishes CPU, memory, active connection count every 10s
-7. Lambda function triggered by CloudWatch alarm (CPU > 70% for 2 consecutive periods) → triggers ASG scale-out
-8. Every 60s: reward is computed from CloudWatch metrics → stored in DynamoDB → used for offline policy update
+**Revised Data Flow:**
+1. JMeter (local) generates HTTP traffic following flash-sale burst profile → **directly to ALB DNS** (HTTP:80)
+2. ALB forwards requests to backend EC2 instances based on current target group weights
+3. Backend EC2 instances process requests → return response → ALB → JMeter records latency
+4. Flask backend publishes 2 custom CloudWatch metrics (QueueDepth, ResponseTimeEMA) every 30s per instance
+5. Lambda State Collector (every 30s): reads CloudWatch metrics → builds 23-dim state vector → writes `state/current.json` to S3
+6. Lambda Inference Coordinator (every 30s): reads S3 state → `POST /infer` to EC2 inference server → inference server returns action → coordinator updates ALB target weights via `elbv2.modify_target_group_attributes` → logs to DynamoDB
+7. CloudWatch alarm (CPU > 70% for 2×30s) → Lambda Scaling Trigger → ASG SetDesiredCapacity
+8. Burst-indicator path: when state vector `burst_indicator = 1`, Lambda Scaling Trigger pre-scales by +2 instances before CPU saturates
 
 ---
 
@@ -553,139 +554,233 @@ Mohar's document proposes a Hierarchical Multi-Agent System (H-MAS). **H-MAS is 
 
 ## 12. AWS Architecture
 
+> **Cost Optimisation Note (added 2026-08-20):** Section 12.0 documents a structured cost review. The core research methodology — PPO-based adaptive load balancing, MDP formulation, reward function, state/action space, and experimental scope E1–E10 — is **unchanged**. Only infrastructure choices that carry unnecessary cost without research benefit have been revised. See ADR-001 D12/D13/D14 for the change log.
+
+### 12.0 AWS Cost Classification
+
+Every AWS service used in this project is classified by research necessity.
+
+| Service | Classification | Reason |
+|---------|---------------|--------|
+| EC2 t2.micro (backend × N) | **KEEP — required** | Backend servers are the experiment subject. Cannot be replaced. |
+| ALB | **KEEP — required** | PPO routing is implemented by adjusting ALB target weights via `elbv2` API. The ALB is the routing mechanism being studied. Replacing it with Nginx would make the PPO→ALB integration — a core novelty claim — untestable on AWS. |
+| Lambda (state collector) | **KEEP — required** | Lightweight (128 MB, <1s), runs on free tier. Builds the 23-dim state vector from CloudWatch metrics. |
+| Lambda (scaling trigger) | **KEEP — required** | Lightweight, free tier. Implements the proactive pre-scaling mechanism (H8 hypothesis). |
+| CloudWatch (EC2 built-in metrics) | **KEEP — required** | CPUUtilization is a built-in free metric. Source of 4 of the 5 state vector components. |
+| CloudWatch (custom metrics) | **KEEP — reduced** | Originally 20+ metrics; reduced to 8 (2 per instance × 4 instances). Stays within the 10 free custom metrics limit. See §12.2. |
+| S3 | **KEEP — required** | Model storage, state buffer, experiment results. Total usage < 5 GB → free tier. |
+| DynamoDB | **KEEP — required** | Routing decision audit trail required for reward verification and reproducibility. Free tier is sufficient. |
+| IAM | **KEEP — required** | Always free. Required for least-privilege security. |
+| SNS | **KEEP — required** | 1 topic for billing alarm. Free tier is sufficient. |
+| ASG | **KEEP — required** | Proactive and reactive scaling are core to E7 experiment (cold-start time). No cost beyond EC2. |
+| **SageMaker** | **OPTIONAL — not primary** | Local training (laptop/Colab) is the primary path. SageMaker only if local training fails. See §12.2. |
+| **API Gateway** | **OPTIONAL — not required** | JMeter can target the ALB DNS directly. API Gateway adds no research value and consumes 1M free-tier calls. Removed from the primary data flow; retained as an optional entry point. See §12.2. |
+| **CloudFront** | **REMOVED** | Dashboard CDN provides no research value. The Dash dashboard runs locally or on one EC2 instance. Free tier does not mean zero operational overhead. Removed. |
+| **EC2 inference server** | **KEEP — revised** | Retained (one t2.micro), but instance is stopped between experiment sessions to minimise billing. |
+
+**Cost reduction summary:**
+
+| Change | Original estimated cost | Revised estimated cost |
+|--------|------------------------|----------------------|
+| Remove API Gateway from critical path | ~$0 (free tier) | $0 — issue eliminated entirely |
+| Remove CloudFront | ~$0 (free tier) | $0 — issue eliminated entirely |
+| Reduce custom CloudWatch metrics | ~$3/month (20 metrics) | ~$0 (≤ 10 metrics, free tier) |
+| SageMaker: optional only | $0.25–$0.50/training run | $0 primary path (local/Colab) |
+| ALB idle time: strict stop/start | ~$5/month if left running | ~$1–2 (active experiment hours only) |
+| EC2 stop/start discipline | ~$5.22/month | ~$2–3 (active hours only) |
+| **Total revised estimate** | **$15–35** | **$5–15** |
+
+> **Important:** This design aims to minimise AWS expenditure and stay within available Free Tier and student credits where possible. It does not guarantee a zero-cost experiment campaign. ALB and EC2 will incur charges during active experiment windows.
+
 ### 12.1 Complete AWS Service Inventory
 
 | # | Service | Resource/Type | Role | Estimated Cost |
 |---|---------|--------------|------|----------------|
-| 1 | EC2 | t2.micro (up to 8 instances) | Backend servers (Flask apps simulating product catalogue) | Free tier: 750 hrs/mo; beyond: ~$0.0116/hr per instance |
-| 2 | ALB (Application Load Balancer) | 1 ALB, 1 HTTPS listener | Route traffic to backend EC2 instances; target group weights updated by PPO | ~$0.008/LCU-hr + $0.0225/hr fixed; not free tier |
-| 3 | AWS Lambda | Python 3.12, 512MB, 30s timeout | (a) State collector: polls CloudWatch → builds state vector; (b) Scaling trigger: calls ASG; (c) PPO inference (optional) | First 1M requests/mo free; well within student budget |
-| 4 | Amazon CloudWatch | Custom namespace, 10s resolution | Collect CPU, connections, latency; trigger alarms; dashboard | 10 custom metrics free; beyond: $0.30/metric/mo |
-| 5 | Amazon S3 | Standard, 1 bucket | Model checkpoints, traffic logs, experiment results | First 5 GB free; beyond: $0.023/GB/mo |
-| 6 | SageMaker | ml.t2.medium notebook instance | Offline PPO/DQN training; only on during training | $0.046/hr; stop immediately after training |
-| 7 | Auto Scaling Groups | Min=2, Max=8, t2.micro | Horizontal scaling of backend pool | No additional cost beyond EC2 |
-| 8 | API Gateway | REST API, no custom domain | Public endpoint for JMeter traffic injection | First 1M calls/mo free |
-| 9 | IAM | Roles + Policies | Least-privilege access for Lambda, EC2, SageMaker | Free |
-| 10 | DynamoDB | On-demand, 1 table | Routing decision log, experiment metadata | First 25 GB free |
-| 11 | Amazon SNS | 1 topic, email | Alarm notifications | First 1M notifications free |
-| 12 | CloudFront | Optional | Dashboard CDN | First 1 TB data transfer free |
+| 1 | EC2 | t2.micro × 4 backend + 1 inference | Backend servers (Flask e-commerce simulator) + PPO inference server | Free tier 750 hrs/mo; beyond: ~$0.0116/hr/instance — stop all instances between sessions |
+| 2 | ALB | 1 ALB, 1 HTTP listener | Routes traffic to backend EC2 instances; PPO updates target weights via `elbv2` boto3 API | ~$0.0225/hr fixed + $0.008/LCU-hr — **not free tier**; delete when not experimenting |
+| 3 | Lambda | Python 3.11, 128 MB, 15s timeout | (a) State collector: CloudWatch → 23-dim state → S3; (b) Scaling trigger: ASG scale-out/in | First 1M requests/mo free → **effectively free** for our use |
+| 4 | CloudWatch | Built-in + 8 custom metrics | CPUUtilization (built-in, free); 8 custom metrics (QueueDepth + ResponseTimeEMA × 4 instances) | Built-in metrics free; 8 custom metrics within the 10-metric free tier → **free** |
+| 5 | S3 | 1 bucket, ~2–4 GB total | Model checkpoints, state buffer (`state/current.json`), experiment results | < 5 GB → **free tier** |
+| 6 | DynamoDB | 1 table, on-demand | Routing decision log (action, state, experiment_id, timestamp) | < 25 GB, < 200M requests → **free tier** |
+| 7 | ASG | Min=2, Max=8, t2.micro | Horizontal EC2 scaling; proactive pre-scaling via Lambda | No additional cost beyond EC2 |
+| 8 | IAM | 2 roles | FlashBalanceAI-Lambda-Role, FlashBalanceAI-EC2-Role (least-privilege) | **Always free** |
+| 9 | SNS | 1 topic | Billing alarm email notification | First 1M notifications free → **free** |
+| 10 | SageMaker *(optional fallback)* | ml.t2.medium notebook | PPO/DQN training **only if** local laptop or Colab fails | $0.046/hr; stop immediately after use; ~$0.20–$0.50 if used |
+| 11 | API Gateway *(optional entry point)* | REST API | Optional front-door for JMeter; not in the critical experiment data path | First 1M calls/mo free; removed from primary flow — JMeter targets ALB DNS directly |
+
+**Removed from architecture:**
+- **CloudFront** — removed entirely; provides no research value for load-balancing experiments.
+- **API Gateway as primary entry point** — removed from critical data path; JMeter directs traffic to ALB DNS.
 
 ### 12.2 Exact Role of Each Service
 
-**EC2 (Backend servers):**
-- Run a lightweight Flask application that simulates an e-commerce product page
-- CPU-intensive endpoint: `GET /product/<id>` performs a 10–50ms computation to simulate DB query
-- CloudWatch agent installed: publishes CPU, memory, active connections every 10s to custom namespace `FlashBalanceAI/Instances`
+**EC2 (Backend servers, t2.micro × 4):**
+- Run a lightweight Flask application simulating an e-commerce product-catalogue endpoint
+- CPU-intensive endpoint: `GET /product/<id>` performs a 10–50ms computation to simulate a DB query
+- CloudWatch agent publishes `CPUUtilization` (built-in) every 60s; Flask backend publishes 2 custom metrics every 30s (see CloudWatch below)
+- Stopped (not terminated — to preserve EBS) between experiment sessions
+
+**EC2 (Inference server, t2.micro × 1):**
+- Runs `src/aws/inference_server.py` (Flask app exposing `POST /infer`)
+- Loads PPO model from S3 at startup; keeps model in memory for the experiment session
+- Called by a lightweight Lambda coordinator every 30s; returns `{"action": int}`
+- Stopped between experiment sessions; started ≥ 60s before experiments begin (model load time)
 
 **ALB:**
-- Single listener on port 80 (HTTP for student account; HTTPS requires ACM certificate)
-- One target group per backend instance OR one weighted target group with configurable weights
+- Single HTTP listener on port 80 → forwards to `FlashBalanceAI-TG` (weighted target group)
 - Target group health check: `GET /health` every 10s, unhealthy threshold = 2
-- PPO agent modifies `Weights` via `elbv2.modify_target_group_attributes` every 100ms
+- PPO agent updates routing weights via `elbv2.modify_target_group_attributes` every 30s
+- ALB access logs written to S3 for per-request latency reconstruction
+- **Deleted between experiment phases to avoid idle $0.0225/hr charge**
 
-**Lambda — State Collector (runs every 10s):**
+**Lambda — State Collector (30s trigger via EventBridge):**
 ```python
 # Pseudo-code
 def collect_state():
-    metrics = cloudwatch.get_metric_statistics(...)  # for each instance
-    state = build_state_vector(metrics)
-    s3.put_object(Key='state/current.json', Body=json.dumps(state))
+    # Reads 4 built-in CW metrics (CPUUtilization) + 8 custom metrics
+    # (QueueDepth × 4, ResponseTimeEMA × 4) from CloudWatch
+    state = build_23dim_state_vector(metrics)
+    s3.put_object(Key='state/current.json', Body=json.dumps({'state': state, 'ts': time.time()}))
 ```
+Memory: 128 MB. Duration: < 3s. Cost: effectively free (< 100k invocations/month).
 
-**Lambda — PPO Inference (runs every 100ms):**
+**Lambda — Inference Coordinator (30s trigger via EventBridge):**
+```python
+# Pseudo-code — lightweight; does NOT load the PPO model
+def coordinate():
+    state = read_state_from_s3()           # < 1 KB JSON
+    action = call_inference_server(state)  # HTTP POST to EC2 inference server
+    update_alb_weights(action)             # boto3 elbv2 call
+    log_to_dynamodb(state, action)         # audit trail
+```
+Memory: 128 MB. Duration: < 2s. Cost: effectively free.
+
+**Lambda — Scaling Trigger (CloudWatch alarm trigger):**
 ```python
 # Pseudo-code
-def inference():
-    state = json.loads(s3.get_object(Key='state/current.json'))
-    action = policy.predict(np.array(state))  # loaded from S3 at cold start
-    elbv2.modify_listener_rule(weights=one_hot(action, N_instances))
-```
-
-**Lambda — Scaling Trigger (triggered by CloudWatch alarm):**
-```python
 def scale_out(event, context):
-    current = autoscaling.describe_auto_scaling_groups(...)['desired']
-    autoscaling.set_desired_capacity(DesiredCapacity=min(current + 1, MAX_INSTANCES))
+    source = event.get('source', 'cloudwatch_alarm')
+    current_desired = get_asg_desired_capacity()
+    if source == 'burst_preemptive':          # burst_indicator = 1
+        new_desired = min(current_desired + 2, MAX_INSTANCES)
+    else:                                      # reactive CPU alarm
+        new_desired = min(current_desired + 1, MAX_INSTANCES)
+    set_asg_desired_capacity(new_desired)
 ```
 
-**CloudWatch:**
-- Metrics: `CPUUtilization` (built-in), `ActiveConnectionCount` (ALB), `TargetResponseTime` (ALB), `QueueDepth` (custom from Flask)
-- Alarms: CPU > 70% for 2×30s → SNS → Lambda scale-out; CPU < 30% for 5×30s → scale-in
-- Dashboard: real-time view of all backend instances + routing decision histogram
+**CloudWatch — Metrics in use (8 custom + built-in):**
+- Built-in (free): `AWS/EC2 CPUUtilization` per instance (4 dimensions)
+- Built-in (free): `AWS/ApplicationELB RequestCount`, `TargetResponseTime`, `ActiveConnectionCount`
+- Custom (8 metrics, within 10-metric free tier): `FlashBalanceAI/Instances QueueDepth` × 4 + `FlashBalanceAI/Instances ResponseTimeEMA` × 4
+- Alarms (5 free): `HighCPU-Alarm` (CPU > 70%, 2×30s), `LowCPU-Alarm` (CPU < 30%, 5×30s), `BillingAlarm-$5`, `BillingAlarm-$20`, `Integration-Watchdog`
+- CloudWatch Logs retained 7 days (reduced from 30 to lower cost)
 
-**S3:**
-- Bucket: `flashbalanceai-{account_id}`
-- Folders: `models/`, `traffic_logs/`, `experiment_results/`, `state/`
-- Model loading: Lambda reads model at cold start; cached in `/tmp` for warm invocations
+> **Removed from custom metrics:** `RequestCount` per instance (approximated from ALB built-in), `active_conn` (approximated from ALB `ActiveConnectionCount`). The `conn` and `arr_raw` state vector components are now derived from free ALB built-in metrics rather than custom published metrics. This reduces custom metric count from ~20 to 8.
 
-**SageMaker:**
-- Used ONLY for offline training (Phase 3)
-- Notebook instance: ml.t2.medium (2 vCPU, 4 GB RAM — sufficient for PPO MLP training)
-- Training script: `src/backend/train_ppo.py` using Stable-Baselines3
-- Training duration: ~2–4 hours for 2M steps with N=4 (local training preferred if SageMaker costs exceed $5)
-- Stop instance immediately after training: `sagemaker.stop_notebook_instance()`
+**S3 — Bucket layout:**
+```
+flashbalanceai-{account_id}/
+├── models/
+│   ├── ppo_flash_v1.zip        (~50 MB)
+│   └── dqn_flash_v1.zip        (~50 MB)
+├── state/
+│   └── current.json            (< 1 KB, overwritten every 30s)
+├── results/                    (JMeter .jtl files + CloudWatch exports)
+└── configs/                    (runtime config copies)
+```
+Expected total: ~2–3 GB. Well within 5 GB free tier.
 
-**ASG (Auto Scaling Groups):**
-- Launch template: t2.micro, Amazon Linux 2, user-data installs Flask + CloudWatch agent
-- Scaling policies: triggered by Lambda (not standard CloudWatch-native scaling) to allow proactive pre-scaling
-- Cooldown: 180s (prevents thrashing)
+**SageMaker *(optional fallback only)*:**
+- Use ONLY if local training (laptop, Google Colab) cannot complete 2M training steps within 8 hours
+- Instance: ml.t2.medium ($0.046/hr). Stop immediately after training.
+- If used: ~$0.20–$0.50 total per training run
+- **Primary path:** local laptop CPU (~3–4 hrs) or Google Colab free tier
 
-**API Gateway:**
-- REST API: `POST /request` → forwards to ALB
-- Stage: `dev` (no custom domain for student account)
-- Throttling: 10,000 req/s burst (default)
-
-**IAM:**
-- Role: `FlashBalanceAI-Lambda-Role` → policies: `CloudWatchReadOnly`, `EC2ReadOnly`, `elasticloadbalancing:ModifyRule`, `autoscaling:SetDesiredCapacity`, `s3:GetObject/PutObject`, `dynamodb:PutItem/GetItem`
-- Role: `FlashBalanceAI-SageMaker-Role` → policies: `SageMakerFullAccess`, `S3ReadWrite` (scoped to `flashbalanceai-*` bucket)
-- No root account keys. All access via assumed roles.
+**API Gateway *(optional entry point — removed from critical path)*:**
+- JMeter directs traffic directly to the ALB DNS: `http://{ALB_DNS}/product/...`
+- API Gateway is no longer in the primary experiment data flow
+- May be added as a security/throttling layer if the team's AWS account security policy requires it, but it provides no research value for the load-balancing experiments themselves
 
 **DynamoDB:**
-- Table: `routing_decisions` (partition key: `timestamp`, sort key: `request_id`)
-- Stores: state vector, action taken, reward computed, episode ID
-- Used for offline analysis and reward verification
+- Table: `routing_decisions` (partition key: `timestamp` String, sort key: `experiment_id` String)
+- Stores: state vector (JSON), action taken, experiment_id, seed, phase label
+- Used for: reward verification, reproducibility audit, offline analysis
+- On-demand billing: free tier covers 25 GB storage + 200M requests/month → **free**
 
-### 12.3 Data Flow Between Services
+**ASG:**
+- `FlashBalanceAI-ASG`: min=2, desired=4, max=8, us-east-1a + us-east-1b
+- Cooldown: 180s (prevents thrashing during experiments)
+- Set desired=0, min=0 between sessions to stop all EC2 instances
+
+**IAM:**
+- `FlashBalanceAI-Lambda-Role`: `cloudwatch:GetMetricStatistics`, `cloudwatch:PutMetricData`, `s3:GetObject/PutObject`, `dynamodb:PutItem`, `elasticloadbalancing:ModifyTargetGroupAttributes`, `autoscaling:SetDesiredCapacity`
+- `FlashBalanceAI-EC2-Role`: `cloudwatch:PutMetricData`, `s3:GetObject`
+- No root account keys. No wildcard `*` permissions.
+
+### 12.3 Revised Data Flow
 
 ```
-JMeter → API Gateway → ALB
-                         ↓ (every request)
-               EC2 Backend (Flask)
-                         ↓ (every 10s)
-               CloudWatch Custom Metrics
-                         ↓ (every 10s)
-               Lambda State Collector → S3 (state/current.json)
-                         ↓ (every 100ms)
-               Lambda PPO Inference → reads S3 state → ALB modify weights
-                         ↓ (every step)
-               DynamoDB (log action + state + reward)
-                         ↓ (alarm triggers)
-               CloudWatch Alarm → SNS → Lambda Scaling → ASG
+JMeter (local) ─────────────────────────────► ALB DNS (HTTP:80)
+                                                  │
+                                    ┌─────────────▼──────────────┐
+                                    │  EC2 Backend Pool (Flask)  │
+                                    │  server-0 … server-3       │
+                                    │  t2.micro × 4              │
+                                    └─────────────┬──────────────┘
+                                                  │ (every 30s)
+                                    ┌─────────────▼──────────────┐
+                                    │  CloudWatch                │
+                                    │  CPUUtil (built-in)        │
+                                    │  QueueDepth × 4 (custom)   │
+                                    │  ResponseTimeEMA × 4       │
+                                    └─────────────┬──────────────┘
+                                                  │
+                            ┌─────────────────────▼──────────────────────┐
+                            │  Lambda: State Collector (every 30s)       │
+                            │  → builds 23-dim state → S3 current.json   │
+                            └─────────────────────┬──────────────────────┘
+                                                  │
+                            ┌─────────────────────▼──────────────────────┐
+                            │  Lambda: Inference Coordinator (every 30s) │
+                            │  → reads S3 state → POST /infer to EC2     │
+                            │  → EC2 inference server returns action      │
+                            │  → boto3 elbv2.modify_target_group_attrs   │
+                            │  → DynamoDB log                            │
+                            └─────────────────────┬──────────────────────┘
+                                                  │ (CPU alarm triggers)
+                            ┌─────────────────────▼──────────────────────┐
+                            │  CloudWatch Alarm → Lambda: Scaling Trigger│
+                            │  → ASG SetDesiredCapacity                  │
+                            └────────────────────────────────────────────┘
 ```
+
+**Removed from data flow:** API Gateway (JMeter targets ALB directly). CloudFront (not used).
 
 ### 12.4 Security / IAM
 
-- All Lambda functions use least-privilege IAM roles scoped to specific resources
-- No public S3 bucket. All S3 access via pre-signed URLs or Lambda internal access
-- ALB not publicly exposed beyond what JMeter needs (security group: allow port 80 from JMeter EC2 only)
-- No SSH keys committed to git. EC2 accessed via AWS Systems Manager Session Manager
+- All Lambda functions use least-privilege IAM roles scoped to specific resources and bucket prefix `flashbalanceai-*`
+- No public S3 bucket; all S3 access via IAM-authenticated Lambda internal calls
+- ALB security group: allow HTTP:80 inbound from JMeter machine IP only (or team's IP range)
+- EC2 backend security group: allow port 5000 inbound from ALB security group only
+- No SSH keys committed to git; EC2 accessed via AWS Systems Manager Session Manager (SSM)
 - DynamoDB table: IAM-controlled, no public access
-- CloudWatch logs: retained 30 days (cost control)
+- CloudWatch Logs: 7-day retention (cost control)
 
 ### 12.5 Logging / Monitoring
 
-- CloudWatch Logs: Lambda function logs (function errors, state collection, inference latency)
-- CloudWatch Metrics: custom namespace `FlashBalanceAI/*` for all application metrics
-- CloudWatch Dashboard: `FlashBalanceAI-Monitor` — real-time view
-- DynamoDB: full action/state/reward audit trail for post-experiment analysis
-- Local Python dashboard (Dash/Plotly): real-time visualisation during experiments
+- CloudWatch Logs: Lambda invocation logs — state collection, inference coordinator, scaling trigger (7-day retention)
+- CloudWatch Metrics: `FlashBalanceAI/Instances` namespace (8 custom metrics: QueueDepth + ResponseTimeEMA per instance)
+- DynamoDB: full action/state/experiment_id audit trail for post-experiment reward verification
+- Local Python/Dash monitoring dashboard (`src/metrics/visualiser.py`) — runs on experimenter's laptop, reads `state/current.json` from S3 every 5s, no AWS dashboard cost
+- CloudWatch Dashboard: optional; use only if team prefers AWS Console view over local Dash
 
 ### 12.6 Model Storage / Deployment
 
-- Training output: `models/ppo_flash_v{version}.zip` → S3
-- Deployment: Lambda `init()` downloads from S3 to `/tmp/model.zip` at cold start, unzips, loads via `PPO.load()`
-- Versioning: S3 versioning enabled on `models/` prefix; every experiment writes a new version
-- Rollback: `boto3.client('s3').copy_object()` to restore previous checkpoint
+- Training output: `models/ppo_flash_v{version}.zip` uploaded to `s3://flashbalanceai-{account_id}/models/`
+- EC2 inference server loads model from S3 at startup (startup latency: < 60s for ~50 MB zip)
+- Model cached in EC2 instance memory for the duration of the experiment session
+- S3 versioning enabled on `models/` prefix for rollback capability
+- No Lambda model loading (Lambda size limit constraint — SB3 + PyTorch ≈ 300 MB unzipped)
 
 ---
 
