@@ -40,3 +40,10 @@ n_eval_episodes: 3             # Episodes per evaluation
 # --- Save paths ---
 save_dir: "models/ppo"
 tensorboard_log: "models/ppo/tb_logs"
+
+# --- Reward Weights ---
+reward_weights:
+  w_lat: 0.4
+  w_util: 0.2
+  w_tput: 0.2
+  w_sla: 0.2
