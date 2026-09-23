@@ -3,9 +3,7 @@
 
 **Document Version:** 1.0  
 **Date:** 2026-08-20  
-**Authors:** Devkanti Sarkar (24BIT0162) · Agrima Gupta (24BIT0253) · Mohar Gorai · [4th team member]  
-**Course:** BCSE355L — Cloud Architecture and Design  
-**Supervisor:** Dr. Priya V  
+**Authors:** Devkanti Sarkar (24BIT0162) · Agrima Gupta (24BIT0253) · Mohar Gorai ·   
 **Branch:** `prd`
 
 ---
