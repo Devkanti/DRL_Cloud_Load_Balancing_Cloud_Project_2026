@@ -1,8 +1,8 @@
-# IMPLEMENTATION PLAN — FlashBalanceAI (Part 1 of 2)
-## Phases 0–4: Design → Local Dev → Dataset → DRL → AWS Deployment
+﻿# IMPLEMENTATION PLAN ΓÇö FlashBalanceAI (Part 1 of 2)
+## Phases 0ΓÇô4: Design ΓåÆ Local Dev ΓåÆ Dataset ΓåÆ DRL ΓåÆ AWS Deployment
 
 **Document Version:** 1.0 | **Date:** 2026-08-20  
-**Team:** Devkanti Sarkar · Agrima Gupta · Mohar Gorai · [4th member]  
+**Team:** Devkanti Sarkar ┬╖ Agrima Gupta ┬╖ Mohar Gorai ┬╖ [4th member]  
 **Read alongside:** `PRD.md` for full methodology, MDP formulation, and research context.  
 
 > **Part 1 covers:** Phase 0 (Design Lock), Phase 1 (Local Dev), Phase 2 (Dataset/Traffic), Phase 3 (DRL Implementation), Phase 4 (AWS Deployment).  
@@ -13,27 +13,27 @@
 ## CONVENTIONS
 
 ```
-[CRITICAL PATH]  — cannot be skipped or parallelised; blocks downstream work
-[PARALLEL]       — safe to run alongside other tasks
-[COSTS MONEY]    — triggers AWS billing; read carefully
-[FREE TIER]      — confirmed within AWS Free Tier or student credit allowance
-[LOCAL ONLY]     — no AWS needed; runs on team laptops
+[CRITICAL PATH]  ΓÇö cannot be skipped or parallelised; blocks downstream work
+[PARALLEL]       ΓÇö safe to run alongside other tasks
+[COSTS MONEY]    ΓÇö triggers AWS billing; read carefully
+[FREE TIER]      ΓÇö confirmed within AWS Free Tier or student credit allowance
+[LOCAL ONLY]     ΓÇö no AWS needed; runs on team laptops
 ```
 
 ---
 
-## PHASE 0 — FINAL ARCHITECTURE / DESIGN LOCK
+## PHASE 0 ΓÇö FINAL ARCHITECTURE / DESIGN LOCK
 
-**Duration:** 1–2 days | **Prerequisites:** PRD.md reviewed by all 4 members
+**Duration:** 1ΓÇô2 days | **Prerequisites:** PRD.md reviewed by all 4 members
 
 ---
 
-### T0.1 — Architecture Decision Record [CRITICAL PATH]
+### T0.1 ΓÇö Architecture Decision Record [CRITICAL PATH]
 
 **Objective:** Lock all design decisions so no one builds contradictory components.
 
 **Steps:**
-1. All 4 members read PRD.md Sections 7–12 in full.
+1. All 4 members read PRD.md Sections 7ΓÇô12 in full.
 2. Hold a 1-hour synchronous meeting (video or in-person) to resolve any disagreements.
 3. Confirm the following decisions in writing (add to a `decisions/ADR-001.md` file in the repo):
    - Primary DRL algorithm: **PPO** (not DDPG, not H-MAS)
@@ -50,14 +50,14 @@
 **Dependencies:** None  
 **Tool:** Google Docs / GitHub wiki / `decisions/ADR-001.md`  
 **Input:** PRD.md  
-**Output:** `decisions/ADR-001.md` — locked architecture record  
+**Output:** `decisions/ADR-001.md` ΓÇö locked architecture record  
 **Estimated Time:** 3 hours (1 meeting + doc write-up)  
 **Acceptance Criteria:** All 4 members have committed a sign-off to the ADR file. No open questions remain.  
 **Costs Money?** No.
 
 ---
 
-### T0.2 — Repository Structure Setup [CRITICAL PATH]
+### T0.2 ΓÇö Repository Structure Setup [CRITICAL PATH]
 
 **Objective:** Create the full directory structure so every team member knows where to put files.
 
@@ -65,69 +65,69 @@
 1. On the `main` branch, create the following structure:
 ```
 DRL_Cloud_Load_Balancing_Cloud_Project_2026/
-├── decisions/
-│   └── ADR-001.md
-├── src/
-│   ├── environment/
-│   │   ├── flash_sale_env.py        # Custom Gymnasium environment
-│   │   └── __init__.py
-│   ├── agents/
-│   │   ├── ppo_agent.py             # PPO training + inference
-│   │   ├── dqn_agent.py             # DQN training + inference
-│   │   └── __init__.py
-│   ├── baselines/
-│   │   ├── round_robin.py
-│   │   ├── weighted_round_robin.py
-│   │   ├── least_connections.py
-│   │   └── threshold_autoscaler.py
-│   ├── traffic/
-│   │   ├── traffic_generator.py     # Synthetic flash-sale generator
-│   │   ├── jmeter_configs/          # JMeter .jmx test plans
-│   │   └── __init__.py
-│   ├── backend/
-│   │   ├── app.py                   # Flask backend simulating EC2 server
-│   │   ├── requirements_backend.txt
-│   │   └── __init__.py
-│   ├── aws/
-│   │   ├── cloudwatch_collector.py  # Lambda: state from CloudWatch
-│   │   ├── ppo_inference.py         # Lambda: PPO inference + ALB update
-│   │   ├── scaling_trigger.py       # Lambda: ASG scale-out/in
-│   │   ├── deploy.py                # boto3 infrastructure setup
-│   │   ├── iam_setup.py             # IAM roles and policies
-│   │   └── __init__.py
-│   ├── metrics/
-│   │   ├── collector.py             # Local metrics aggregation
-│   │   ├── visualiser.py            # Dash dashboard
-│   │   └── __init__.py
-│   └── tests/
-│       ├── test_environment.py
-│       ├── test_reward.py
-│       ├── test_traffic_generator.py
-│       ├── test_baselines.py
-│       ├── test_ppo_agent.py
-│       └── test_dqn_agent.py
-├── notebooks/
-│   ├── 01_traffic_analysis.ipynb
-│   ├── 02_ppo_training.ipynb
-│   ├── 03_results_analysis.ipynb
-│   └── 04_ablation_study.ipynb
-├── configs/
-│   ├── ppo_config.yaml              # PPO hyperparameters
-│   ├── dqn_config.yaml              # DQN hyperparameters
-│   ├── traffic_config.yaml          # Traffic generator parameters
-│   └── aws_config.yaml              # AWS resource identifiers
-├── experiments/
-│   ├── results/                     # Raw JMeter .jtl files, CloudWatch exports
-│   └── analysis/                    # Processed CSVs, plots
-├── infra/
-│   └── cloudformation/              # Optional: CloudFormation templates
-├── PRD.md
-├── IMPLEMENTATION_PLAN_PART1.md
-├── IMPLEMENTATION_PLAN_PART2.md
-├── requirements.txt                 # Pinned Python dependencies
-├── environment.yml                  # Conda environment
-├── .gitignore
-└── README.md
+Γö£ΓöÇΓöÇ decisions/
+Γöé   ΓööΓöÇΓöÇ ADR-001.md
+Γö£ΓöÇΓöÇ src/
+Γöé   Γö£ΓöÇΓöÇ environment/
+Γöé   Γöé   Γö£ΓöÇΓöÇ flash_sale_env.py        # Custom Gymnasium environment
+Γöé   Γöé   ΓööΓöÇΓöÇ __init__.py
+Γöé   Γö£ΓöÇΓöÇ agents/
+Γöé   Γöé   Γö£ΓöÇΓöÇ ppo_agent.py             # PPO training + inference
+Γöé   Γöé   Γö£ΓöÇΓöÇ dqn_agent.py             # DQN training + inference
+Γöé   Γöé   ΓööΓöÇΓöÇ __init__.py
+Γöé   Γö£ΓöÇΓöÇ baselines/
+Γöé   Γöé   Γö£ΓöÇΓöÇ round_robin.py
+Γöé   Γöé   Γö£ΓöÇΓöÇ weighted_round_robin.py
+Γöé   Γöé   Γö£ΓöÇΓöÇ least_connections.py
+Γöé   Γöé   ΓööΓöÇΓöÇ threshold_autoscaler.py
+Γöé   Γö£ΓöÇΓöÇ traffic/
+Γöé   Γöé   Γö£ΓöÇΓöÇ traffic_generator.py     # Synthetic flash-sale generator
+Γöé   Γöé   Γö£ΓöÇΓöÇ jmeter_configs/          # JMeter .jmx test plans
+Γöé   Γöé   ΓööΓöÇΓöÇ __init__.py
+Γöé   Γö£ΓöÇΓöÇ backend/
+Γöé   Γöé   Γö£ΓöÇΓöÇ app.py                   # Flask backend simulating EC2 server
+Γöé   Γöé   Γö£ΓöÇΓöÇ requirements_backend.txt
+Γöé   Γöé   ΓööΓöÇΓöÇ __init__.py
+Γöé   Γö£ΓöÇΓöÇ aws/
+Γöé   Γöé   Γö£ΓöÇΓöÇ cloudwatch_collector.py  # Lambda: state from CloudWatch
+Γöé   Γöé   Γö£ΓöÇΓöÇ ppo_inference.py         # Lambda: PPO inference + ALB update
+Γöé   Γöé   Γö£ΓöÇΓöÇ scaling_trigger.py       # Lambda: ASG scale-out/in
+Γöé   Γöé   Γö£ΓöÇΓöÇ deploy.py                # boto3 infrastructure setup
+Γöé   Γöé   Γö£ΓöÇΓöÇ iam_setup.py             # IAM roles and policies
+Γöé   Γöé   ΓööΓöÇΓöÇ __init__.py
+Γöé   Γö£ΓöÇΓöÇ metrics/
+Γöé   Γöé   Γö£ΓöÇΓöÇ collector.py             # Local metrics aggregation
+Γöé   Γöé   Γö£ΓöÇΓöÇ visualiser.py            # Dash dashboard
+Γöé   Γöé   ΓööΓöÇΓöÇ __init__.py
+Γöé   ΓööΓöÇΓöÇ tests/
+Γöé       Γö£ΓöÇΓöÇ test_environment.py
+Γöé       Γö£ΓöÇΓöÇ test_reward.py
+Γöé       Γö£ΓöÇΓöÇ test_traffic_generator.py
+Γöé       Γö£ΓöÇΓöÇ test_baselines.py
+Γöé       Γö£ΓöÇΓöÇ test_ppo_agent.py
+Γöé       ΓööΓöÇΓöÇ test_dqn_agent.py
+Γö£ΓöÇΓöÇ notebooks/
+Γöé   Γö£ΓöÇΓöÇ 01_traffic_analysis.ipynb
+Γöé   Γö£ΓöÇΓöÇ 02_ppo_training.ipynb
+Γöé   Γö£ΓöÇΓöÇ 03_results_analysis.ipynb
+Γöé   ΓööΓöÇΓöÇ 04_ablation_study.ipynb
+Γö£ΓöÇΓöÇ configs/
+Γöé   Γö£ΓöÇΓöÇ ppo_config.yaml              # PPO hyperparameters
+Γöé   Γö£ΓöÇΓöÇ dqn_config.yaml              # DQN hyperparameters
+Γöé   Γö£ΓöÇΓöÇ traffic_config.yaml          # Traffic generator parameters
+Γöé   ΓööΓöÇΓöÇ aws_config.yaml              # AWS resource identifiers
+Γö£ΓöÇΓöÇ experiments/
+Γöé   Γö£ΓöÇΓöÇ results/                     # Raw JMeter .jtl files, CloudWatch exports
+Γöé   ΓööΓöÇΓöÇ analysis/                    # Processed CSVs, plots
+Γö£ΓöÇΓöÇ infra/
+Γöé   ΓööΓöÇΓöÇ cloudformation/              # Optional: CloudFormation templates
+Γö£ΓöÇΓöÇ PRD.md
+Γö£ΓöÇΓöÇ IMPLEMENTATION_PLAN_PART1.md
+Γö£ΓöÇΓöÇ IMPLEMENTATION_PLAN_PART2.md
+Γö£ΓöÇΓöÇ requirements.txt                 # Pinned Python dependencies
+Γö£ΓöÇΓöÇ environment.yml                  # Conda environment
+Γö£ΓöÇΓöÇ .gitignore
+ΓööΓöÇΓöÇ README.md
 ```
 2. Create placeholder `__init__.py` files. Create `requirements.txt` (see T1.2).
 3. Add `.gitignore` entries: `*.pyc`, `__pycache__/`, `.env`, `*.jtl`, `models/*.zip`, `experiments/results/raw/`.
@@ -143,18 +143,18 @@ DRL_Cloud_Load_Balancing_Cloud_Project_2026/
 
 ---
 
-## PHASE 1 — LOCAL DEVELOPMENT
+## PHASE 1 ΓÇö LOCAL DEVELOPMENT
 
-**Duration:** 5–7 days | **All tasks [LOCAL ONLY] unless noted**
+**Duration:** 5ΓÇô7 days | **All tasks [LOCAL ONLY] unless noted**
 
 ---
 
-### T1.1 — Python Environment Setup [CRITICAL PATH][LOCAL ONLY]
+### T1.1 ΓÇö Python Environment Setup [CRITICAL PATH][LOCAL ONLY]
 
 **Objective:** Reproducible Python environment across all 4 team members.
 
 **Steps:**
-1. Install Python 3.11 (not 3.12 — Stable-Baselines3 compatibility confirmed on 3.11).
+1. Install Python 3.11 (not 3.12 ΓÇö Stable-Baselines3 compatibility confirmed on 3.11).
 2. Create conda environment:
 ```bash
 conda create -n flashbalance python=3.11 -y
@@ -190,7 +190,7 @@ pip install stable-baselines3==2.3.0 \
 
 ---
 
-### T1.2 — Flask Backend Server [LOCAL ONLY][PARALLEL]
+### T1.2 ΓÇö Flask Backend Server [LOCAL ONLY][PARALLEL]
 
 **Objective:** Simulated EC2 backend server that responds to HTTP requests with configurable artificial latency (simulates CPU-bound product-page rendering).
 
@@ -211,7 +211,7 @@ def health():
 @app.route("/product/<int:pid>")
 def product(pid):
     # Simulate CPU-bound work; latency increases with queue depth
-    latency = BASE_LATENCY_MS + random.gauss(0, 5)  # ±5ms jitter
+    latency = BASE_LATENCY_MS + random.gauss(0, 5)  # ┬▒5ms jitter
     time.sleep(max(0, latency / 1000.0))
     return jsonify({"product_id": pid, "instance": INSTANCE_ID, "price": 99.99}), 200
 
@@ -223,21 +223,21 @@ def metrics():
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
 ```
-2. Test locally: start 4 instances on ports 5001–5004 using `INSTANCE_ID=server-0 PORT=5001 python app.py`.
+2. Test locally: start 4 instances on ports 5001ΓÇô5004 using `INSTANCE_ID=server-0 PORT=5001 python app.py`.
 3. Verify health check: `curl http://localhost:5001/health` returns `{"status": "healthy"}`.
 4. Create `src/backend/requirements_backend.txt`: `flask==3.0.3 gunicorn==21.2.0`.
 
 **Dependencies:** T1.1  
 **Tool:** Python, Flask  
 **Input:** None  
-**Output:** `src/backend/app.py` — working HTTP server with `/health`, `/product/<id>`, `/metrics` endpoints  
+**Output:** `src/backend/app.py` ΓÇö working HTTP server with `/health`, `/product/<id>`, `/metrics` endpoints  
 **Estimated Time:** 2 hours  
 **Acceptance Criteria:** All 3 endpoints return correct HTTP 200 with valid JSON. Latency measurably increases when BASE_LATENCY_MS is raised.  
 **Costs Money?** No.
 
 ---
 
-### T1.3 — Custom Gymnasium Environment [CRITICAL PATH][LOCAL ONLY]
+### T1.3 ΓÇö Custom Gymnasium Environment [CRITICAL PATH][LOCAL ONLY]
 
 **Objective:** Discrete-time simulation environment for PPO/DQN training that mimics the AWS backend without requiring live AWS.
 
@@ -253,7 +253,7 @@ class FlashSaleEnv(gym.Env):
     State: [cpu_util x N, active_conn x N, queue_depth x N,
             resp_time_ema x N, health_status x N,
             arrival_rate_norm, burst_indicator, time_since_spike]
-    Action: discrete integer in {0, ..., N-1} — target backend instance
+    Action: discrete integer in {0, ..., N-1} ΓÇö target backend instance
     """
     metadata = {"render_modes": ["human"]}
 
@@ -313,7 +313,7 @@ class FlashSaleEnv(gym.Env):
                 self.cpu[i] = max(0.05, self.cpu[i] * 0.9 - 0.01)
 
         # Response time EMA
-        base_resp = 0.1 + self.cpu[action] * 0.8  # normalised 0–1 (0=20ms, 1=200ms)
+        base_resp = 0.1 + self.cpu[action] * 0.8  # normalised 0ΓÇô1 (0=20ms, 1=200ms)
         self.resp_ema[action] = 0.7 * self.resp_ema[action] + 0.3 * base_resp
 
         # Reward computation
@@ -351,7 +351,7 @@ class FlashSaleEnv(gym.Env):
 
 ---
 
-### T1.4 — Baseline Load Balancers [LOCAL ONLY][PARALLEL]
+### T1.4 ΓÇö Baseline Load Balancers [LOCAL ONLY][PARALLEL]
 
 **Objective:** Software implementations of all non-DRL baselines for fair comparison.
 
@@ -387,10 +387,10 @@ class LeastConnectionsLB:
         conn = state[self.n:2*self.n]  # active_conn slice of state
         return int(np.argmin(conn))
 ```
-4. Create `src/baselines/threshold_autoscaler.py` — simulates CloudWatch threshold logic:
+4. Create `src/baselines/threshold_autoscaler.py` ΓÇö simulates CloudWatch threshold logic:
 ```python
 class ThresholdAutoscaler:
-    """Mimics CloudWatch alarm: CPU > 0.70 for 2 consecutive periods → scale out."""
+    """Mimics CloudWatch alarm: CPU > 0.70 for 2 consecutive periods ΓåÆ scale out."""
     def __init__(self, n, low=0.30, high=0.70, consecutive=2):
         self.n = n; self.low = low; self.high = high
         self.consecutive = consecutive; self.counter_high = 0; self.counter_low = 0
@@ -409,7 +409,7 @@ class ThresholdAutoscaler:
         # Round-robin routing (threshold autoscaler only controls count)
         return RoundRobinLB(self.n).select()
 ```
-5. Write tests in `src/tests/test_baselines.py` — verify all `select()` returns integer in `[0, N-1]`.
+5. Write tests in `src/tests/test_baselines.py` ΓÇö verify all `select()` returns integer in `[0, N-1]`.
 
 **Dependencies:** T1.1  
 **Tool:** Python  
@@ -421,7 +421,7 @@ class ThresholdAutoscaler:
 
 ---
 
-### T1.5 — Metrics Collection Module [LOCAL ONLY][PARALLEL]
+### T1.5 ΓÇö Metrics Collection Module [LOCAL ONLY][PARALLEL]
 
 **Objective:** Collect, aggregate, and store all experiment metrics in a standardised format for statistical analysis.
 
@@ -464,7 +464,7 @@ class MetricsCollector:
     def save(self, path):
         pd.DataFrame(self.records).to_csv(path, index=False)
 ```
-2. Write `src/tests/test_metrics.py` — verify compute_summary keys and value ranges.
+2. Write `src/tests/test_metrics.py` ΓÇö verify compute_summary keys and value ranges.
 
 **Dependencies:** T1.1  
 **Tool:** Python, pandas, numpy  
@@ -475,13 +475,13 @@ class MetricsCollector:
 
 ---
 
-## PHASE 2 — DATASET + TRAFFIC GENERATION
+## PHASE 2 ΓÇö DATASET + TRAFFIC GENERATION
 
-**Duration:** 3–4 days | **[LOCAL ONLY]** | **[PARALLEL with Phase 1 after T1.1]**
+**Duration:** 3ΓÇô4 days | **[LOCAL ONLY]** | **[PARALLEL with Phase 1 after T1.1]**
 
 ---
 
-### T2.1 — Synthetic Flash-Sale Traffic Generator [CRITICAL PATH][LOCAL ONLY]
+### T2.1 ΓÇö Synthetic Flash-Sale Traffic Generator [CRITICAL PATH][LOCAL ONLY]
 
 **Objective:** Parameterisable traffic generator producing arrival rate time-series with configurable burst multipliers and reproducible seeds.
 
@@ -558,13 +558,13 @@ scenarios:
   train_episodes: { burst_multiplier: 10.0, noise_std_fraction: 0.10, seed: 42 }
   val_episodes:   { burst_multiplier: 10.0, noise_std_fraction: 0.10, seed: 43 }
 ```
-3. Plot each traffic profile to `notebooks/01_traffic_analysis.ipynb` — verify visually.
+3. Plot each traffic profile to `notebooks/01_traffic_analysis.ipynb` ΓÇö verify visually.
 4. Write `src/tests/test_traffic_generator.py`:
    - `test_profile_length()`: assert `len(profile) == n_steps`
-   - `test_baseline_range()`: baseline steps have mean ≈ 1.0 ± 0.2
-   - `test_burst_peak()`: peak steps have mean ≈ burst_multiplier ± 10%
-   - `test_reproducibility()`: same seed → identical profile
-   - `test_different_seeds()`: different seeds → different profiles
+   - `test_baseline_range()`: baseline steps have mean Γëê 1.0 ┬▒ 0.2
+   - `test_burst_peak()`: peak steps have mean Γëê burst_multiplier ┬▒ 10%
+   - `test_reproducibility()`: same seed ΓåÆ identical profile
+   - `test_different_seeds()`: different seeds ΓåÆ different profiles
 
 **Dependencies:** T1.1  
 **Tool:** Python, numpy  
@@ -576,19 +576,19 @@ scenarios:
 
 ---
 
-### T2.2 — JMeter Test Plans [PARALLEL]
+### T2.2 ΓÇö JMeter Test Plans [PARALLEL]
 
-**Objective:** JMeter `.jmx` test plans for injecting synthetic traffic into the deployed AWS backend during Phases 5–6.
+**Objective:** JMeter `.jmx` test plans for injecting synthetic traffic into the deployed AWS backend during Phases 5ΓÇô6.
 
 **Steps:**
 1. Download Apache JMeter 5.6.3 (free, open source).
 2. Create `src/traffic/jmeter_configs/flash_sale_10x.jmx` with:
-   - Thread Group: Ramp-up 100 users → 1000 users in 10 seconds
+   - Thread Group: Ramp-up 100 users ΓåÆ 1000 users in 10 seconds
    - HTTP Sampler: `GET http://{ALB_DNS}/product/${__Random(1,1000)}`
    - Duration Controller: 13 minutes total
    - Response Assertion: status code 200
    - Listeners: Summary Report, Response Time Graph, Aggregate Report (save as CSV)
-3. Duplicate for 50× scenario: 5000 users peak.
+3. Duplicate for 50├ù scenario: 5000 users peak.
 4. Add a CSV Data Set Config pointing to `configs/traffic_config.yaml` arrival rates.
 5. Parameterise with JMeter properties: `-Jhost=ALB_DNS -Jpeak_users=1000`.
 6. Test locally against 4 Flask backends: `jmeter -n -t flash_sale_10x.jmx -Jhost=localhost -Jport=5001`.
@@ -603,13 +603,13 @@ scenarios:
 
 ---
 
-### T2.3 — Alibaba Cluster Trace Acquisition [PARALLEL]
+### T2.3 ΓÇö Alibaba Cluster Trace Acquisition [PARALLEL]
 
 **Objective:** Download Alibaba Cloud Cluster Trace for supplementary pre-training analysis (NOT primary dataset).
 
 **Steps:**
-1. Visit https://github.com/alibaba/clusterdata — choose `cluster-trace-v2018`.
-2. Download `batch_task.tar.gz` (≈ 2 GB compressed) from the release page.
+1. Visit https://github.com/alibaba/clusterdata ΓÇö choose `cluster-trace-v2018`.
+2. Download `batch_task.tar.gz` (Γëê 2 GB compressed) from the release page.
 3. Extract to `data/alibaba_trace/` (add to `.gitignore`).
 4. Pre-process in `notebooks/01_traffic_analysis.ipynb`:
    - Load `batch_task.csv` (columns: `task_name`, `start_time`, `end_time`, `plan_cpu`, `plan_mem`)
@@ -617,7 +617,7 @@ scenarios:
    - Normalise to match FlashSale-Synthetic format
    - Save processed file to `data/alibaba_processed.csv`
 
-**⚠️ INTEGRITY NOTE:** The Alibaba trace is batch job scheduling data, NOT e-commerce request routing data. Do not claim it validates flash-sale routing. Use only for: (a) comparing arrival rate distributions in the paper's supplementary material, (b) optional agent pre-training warm-start.
+**ΓÜá∩╕Å INTEGRITY NOTE:** The Alibaba trace is batch job scheduling data, NOT e-commerce request routing data. Do not claim it validates flash-sale routing. Use only for: (a) comparing arrival rate distributions in the paper's supplementary material, (b) optional agent pre-training warm-start.
 
 **Dependencies:** T1.1, internet access  
 **Tool:** Python, pandas  
@@ -629,13 +629,13 @@ scenarios:
 
 ---
 
-## PHASE 3 — DRL IMPLEMENTATION
+## PHASE 3 ΓÇö DRL IMPLEMENTATION
 
-**Duration:** 7–10 days | **[LOCAL ONLY]**
+**Duration:** 7ΓÇô10 days | **[LOCAL ONLY]**
 
 ---
 
-### T3.1 — PPO Agent: Training [CRITICAL PATH][LOCAL ONLY]
+### T3.1 ΓÇö PPO Agent: Training [CRITICAL PATH][LOCAL ONLY]
 
 **Objective:** Train PPO agent on `FlashSaleEnv`, checkpoint to disk, achieve convergence.
 
@@ -701,15 +701,15 @@ vf_coef: 0.5
 net_arch: [64, 64]
 total_timesteps: 2000000
 ```
-3. Run training: `python -m src.agents.ppo_agent` (~2–4 hours on laptop CPU with 4 envs).
+3. Run training: `python -m src.agents.ppo_agent` (~2ΓÇô4 hours on laptop CPU with 4 envs).
 4. Monitor TensorBoard: `tensorboard --logdir models/ppo/tb_logs/`.
 5. Convergence criterion: mean episode reward stops increasing (< 1% change over 500k steps).
 6. Save final model as `models/ppo/ppo_flash_v1.zip`.
 
 **Expected training time (CPU only):**
-- Laptop (4 cores, no GPU): ~3–4 hours for 2M steps with n_envs=4
-- Google Colab (free, CPU): ~5–6 hours
-- SageMaker ml.t2.medium: ~4–5 hours ($0.046/hr → ≈ $0.20 total) [COSTS MONEY]
+- Laptop (4 cores, no GPU): ~3ΓÇô4 hours for 2M steps with n_envs=4
+- Google Colab (free, CPU): ~5ΓÇô6 hours
+- SageMaker ml.t2.medium: ~4ΓÇô5 hours ($0.046/hr ΓåÆ Γëê $0.20 total) [COSTS MONEY]
 
 **Dependencies:** T1.3 (environment), T1.1 (environment)  
 **Tool:** Stable-Baselines3, PyTorch, TensorBoard  
@@ -717,11 +717,11 @@ total_timesteps: 2000000
 **Output:** `models/ppo/ppo_flash_v1.zip`, TensorBoard reward curves  
 **Estimated Time:** 5 hours implementation + 4 hours training = 9 hours total  
 **Acceptance Criteria:** Training completes without error. TensorBoard shows reward increasing and plateauing. `model.predict(obs)` returns action in `[0, 3]` within 5ms.  
-**Costs Money?** No (local). If using SageMaker: ~$0.20–$0.50.
+**Costs Money?** No (local). If using SageMaker: ~$0.20ΓÇô$0.50.
 
 ---
 
-### T3.2 — DQN Agent: Training [PARALLEL with T3.1]
+### T3.2 ΓÇö DQN Agent: Training [PARALLEL with T3.1]
 
 **Objective:** Train DQN baseline on identical `FlashSaleEnv` for direct PPO comparison.
 
@@ -780,7 +780,7 @@ net_arch: [64, 64]
 total_timesteps: 2000000
 ```
 3. Train identically to PPO: `python -m src.agents.dqn_agent`.
-4. **IMPORTANT:** Use the same test seeds (44–58) as PPO for the comparison. Never use validation seeds for final evaluation.
+4. **IMPORTANT:** Use the same test seeds (44ΓÇô58) as PPO for the comparison. Never use validation seeds for final evaluation.
 
 **Dependencies:** T1.3, T3.1 (environment must be finalised before training starts)  
 **Tool:** Stable-Baselines3  
@@ -792,7 +792,7 @@ total_timesteps: 2000000
 
 ---
 
-### T3.3 — Local Evaluation: All Algorithms [CRITICAL PATH]
+### T3.3 ΓÇö Local Evaluation: All Algorithms [CRITICAL PATH]
 
 **Objective:** Run all 6 algorithms (PPO, DQN, RR, WRR, LC, Threshold) on the test set in `FlashSaleEnv`. Confirm PPO and DQN behave plausibly before AWS deployment.
 
@@ -831,12 +831,12 @@ for name, agent in algorithms.items():
                 action = agent.select(obs)
             obs, reward, done, _, _ = env.step(action)
             collector.record_step(env.step_count, action, reward, obs,
-                                  obs[3*4 + int(action)] * 500,  # resp_ema → ms
+                                  obs[3*4 + int(action)] * 500,  # resp_ema ΓåÆ ms
                                   obs[:4], obs[3*4 + int(action)] > 0.7)
         run_results.append(collector.compute_summary())
     results[name] = run_results
 ```
-2. Compute mean ± std for each metric across 5 runs.
+2. Compute mean ┬▒ std for each metric across 5 runs.
 3. Plot reward convergence curves for PPO and DQN.
 4. Generate preliminary comparison table (P95 latency, CPU utilisation, SLA violation rate).
 5. **GATE CHECK:** If PPO does NOT outperform Round Robin on P95 latency by at least 10%, debug the environment and reward function before proceeding to AWS deployment.
@@ -851,58 +851,58 @@ for name, agent in algorithms.items():
 
 ---
 
-## PHASE 4 — AWS DEPLOYMENT
+## PHASE 4 ΓÇö AWS DEPLOYMENT
 
-**Duration:** 5–7 days | **[COSTS MONEY — read all cost notes carefully]**
+**Duration:** 5ΓÇô7 days | **[COSTS MONEY ΓÇö read all cost notes carefully]**
 
-> **Cost optimisation revision (2026-08-20):** This phase reflects the revised low-cost architecture from PRD §12. Key changes: (1) API Gateway removed from primary data path — JMeter targets ALB DNS directly; (2) CloudFront removed entirely; (3) SageMaker demoted to optional fallback (T4.7); (4) custom CloudWatch metrics reduced to 8 (within free tier); (5) ALB must be deleted between experiment phases to avoid idle charges. Research methodology unchanged.
+> **Cost optimisation revision (2026-08-20):** This phase reflects the revised low-cost architecture from PRD ┬º12. Key changes: (1) API Gateway removed from primary data path ΓÇö JMeter targets ALB DNS directly; (2) CloudFront removed entirely; (3) SageMaker demoted to optional fallback (T4.7); (4) custom CloudWatch metrics reduced to 8 (within free tier); (5) ALB must be deleted between experiment phases to avoid idle charges. Research methodology unchanged.
 
 ---
 
 ### AWS COST ANALYSIS AND FREE TIER VERIFICATION
 
-**⚠️ IMPORTANT:** Based on AWS pricing as of mid-2026 for us-east-1. Always verify at https://aws.amazon.com/pricing/ before spending.
+**ΓÜá∩╕Å IMPORTANT:** Based on AWS pricing as of mid-2026 for us-east-1. Always verify at https://aws.amazon.com/pricing/ before spending.
 
 | Service | Free Tier | Beyond Free Tier | Notes |
 |---------|-----------|------------------|-------|
-| EC2 t2.micro | 750 hrs/month (new accounts) | $0.0116/hr | 5 instances stopped between sessions; active ~4 hrs/day × 14 exp days = 280 hrs ≈ **within free tier if new account** |
-| ALB | **NOT free tier** | $0.0225/hr + $0.008/LCU-hr | Active ~4 hrs/day × 14 days = 56 hrs → **~$1.30 + LCU** — **delete between experiment phases** |
-| Lambda | 1M requests/month free | $0.20/1M req beyond | < 100k invocations → **free** |
-| CloudWatch custom metrics | 10 metrics free | $0.30/metric/month beyond | **8 custom metrics → free tier** (reduced from ~20) |
-| CloudWatch alarms | 10 alarms free | $0.10/alarm/month beyond | 5 alarms used → **free** |
-| S3 | 5 GB free | $0.023/GB/month | ~2–3 GB total → **free** |
-| SageMaker ml.t2.medium | **NOT free tier** | $0.046/hr | Optional fallback only; ~$0.20–$0.50 if used once |
-| API Gateway | *(removed from primary path)* | — | JMeter → ALB DNS directly; API GW not provisioned |
-| ASG | Free (EC2 cost only) | — | No additional cost |
-| DynamoDB | 25 GB + 200M req/month free | — | **Free** |
-| SNS | 1M notifications free | — | **Free** |
-| IAM | Always free | — | **Free** |
-| CloudFront | *(removed from architecture)* | — | Not provisioned |
+| EC2 t2.micro | 750 hrs/month (new accounts) | $0.0116/hr | 5 instances stopped between sessions; active ~4 hrs/day ├ù 14 exp days = 280 hrs Γëê **within free tier if new account** |
+| ALB | **NOT free tier** | $0.0225/hr + $0.008/LCU-hr | Active ~4 hrs/day ├ù 14 days = 56 hrs ΓåÆ **~$1.30 + LCU** ΓÇö **delete between experiment phases** |
+| Lambda | 1M requests/month free | $0.20/1M req beyond | < 100k invocations ΓåÆ **free** |
+| CloudWatch custom metrics | 10 metrics free | $0.30/metric/month beyond | **8 custom metrics ΓåÆ free tier** (reduced from ~20) |
+| CloudWatch alarms | 10 alarms free | $0.10/alarm/month beyond | 5 alarms used ΓåÆ **free** |
+| S3 | 5 GB free | $0.023/GB/month | ~2ΓÇô3 GB total ΓåÆ **free** |
+| SageMaker ml.t2.medium | **NOT free tier** | $0.046/hr | Optional fallback only; ~$0.20ΓÇô$0.50 if used once |
+| API Gateway | *(removed from primary path)* | ΓÇö | JMeter ΓåÆ ALB DNS directly; API GW not provisioned |
+| ASG | Free (EC2 cost only) | ΓÇö | No additional cost |
+| DynamoDB | 25 GB + 200M req/month free | ΓÇö | **Free** |
+| SNS | 1M notifications free | ΓÇö | **Free** |
+| IAM | Always free | ΓÇö | **Free** |
+| CloudFront | *(removed from architecture)* | ΓÇö | Not provisioned |
 
 **REVISED ESTIMATED TOTAL AWS COST FOR FULL EXPERIMENT CAMPAIGN:**
 
 | Scenario | Original Estimate | Revised Estimate |
 |----------|------------------|-----------------|
-| Conservative (4 hrs active/day, 14 days) | $12–18 | **$4–8** |
-| Realistic (6 hrs active/day, 14 days) | $20–30 | **$7–12** |
-| Maximum (8 hrs active/day, 14 days) | $35–45 | **$10–15** |
+| Conservative (4 hrs active/day, 14 days) | $12ΓÇô18 | **$4ΓÇô8** |
+| Realistic (6 hrs active/day, 14 days) | $20ΓÇô30 | **$7ΓÇô12** |
+| Maximum (8 hrs active/day, 14 days) | $35ΓÇô45 | **$10ΓÇô15** |
 
 > **This design aims to minimise AWS expenditure. It does not guarantee zero cost. ALB and EC2 will incur charges during active experiment windows. Do not leave resources running overnight.**
 
 **BILLING SAFEGUARDS (mandatory before starting Phase 4):**
 1. Set a CloudWatch billing alarm at **$5** (warning email) and **$20** (action email).
-2. Set AWS Budgets alert: Monthly cost > $15 → email all 4 team members immediately.
+2. Set AWS Budgets alert: Monthly cost > $15 ΓåÆ email all 4 team members immediately.
 3. **ALWAYS stop EC2 instances (desired=0, min=0) and delete ALB after each experiment session.**
 4. Enable Cost Explorer to monitor daily spend; check each morning during experiment phase.
 
 ---
 
-### T4.1 — AWS Account Setup and Safety [CRITICAL PATH][COSTS MONEY]
+### T4.1 ΓÇö AWS Account Setup and Safety [CRITICAL PATH][COSTS MONEY]
 
 **Objective:** Prepare AWS account with billing safeguards, IAM roles, and resource limits before any chargeable resources are created.
 
 **Steps:**
-1. Sign in to AWS Console as root user → go to Billing → Billing Preferences → enable billing alerts.
+1. Sign in to AWS Console as root user ΓåÆ go to Billing ΓåÆ Billing Preferences ΓåÆ enable billing alerts.
 2. Create CloudWatch billing alarm:
    - Metric: `EstimatedCharges`, threshold: $5 (warning)
    - Create second alarm at $25 (action: email team)
@@ -914,10 +914,10 @@ aws iam attach-user-policy --user-name flashbalance-admin \
     --policy-arn arn:aws:iam::aws:policy/AdministratorAccess
 aws iam create-access-key --user-name flashbalance-admin
 ```
-5. Configure AWS CLI: `aws configure` → enter access key, secret, region=us-east-1, output=json.
+5. Configure AWS CLI: `aws configure` ΓåÆ enter access key, secret, region=us-east-1, output=json.
 6. Verify: `aws sts get-caller-identity` returns your account ID.
-7. Check EC2 t2.micro quota: `aws service-quotas get-service-quota --service-code ec2 --quota-code L-1216C47A` → must be ≥ 5.
-8. If quota < 5: request increase via Service Quotas console (takes 1–2 business days).
+7. Check EC2 t2.micro quota: `aws service-quotas get-service-quota --service-code ec2 --quota-code L-1216C47A` ΓåÆ must be ΓëÑ 5.
+8. If quota < 5: request increase via Service Quotas console (takes 1ΓÇô2 business days).
 
 **Dependencies:** None (first AWS task)  
 **Tool:** AWS Console, AWS CLI  
@@ -929,7 +929,7 @@ aws iam create-access-key --user-name flashbalance-admin
 
 ---
 
-### T4.2 — IAM Roles and Policies [CRITICAL PATH]
+### T4.2 ΓÇö IAM Roles and Policies [CRITICAL PATH]
 
 **Objective:** Create least-privilege IAM roles for Lambda, EC2, and SageMaker.
 
@@ -983,7 +983,7 @@ iam.put_role_policy(RoleName="FlashBalanceAI-Lambda-Role",
                     PolicyDocument=LAMBDA_POLICY)
 print("Lambda role ARN:", role['Role']['Arn'])
 ```
-2. Run: `python src/aws/iam_setup.py` → note the role ARN, add to `configs/aws_config.yaml`.
+2. Run: `python src/aws/iam_setup.py` ΓåÆ note the role ARN, add to `configs/aws_config.yaml`.
 3. Create SageMaker execution role similarly (trust: `sagemaker.amazonaws.com`) with `AmazonSageMakerFullAccess` + `S3ReadWrite` scoped to the project bucket.
 
 **How to delete:** `aws iam delete-role-policy --role-name FlashBalanceAI-Lambda-Role --policy-name FlashBalanceLambdaPolicy` then `aws iam delete-role --role-name FlashBalanceAI-Lambda-Role`.
@@ -997,7 +997,7 @@ print("Lambda role ARN:", role['Role']['Arn'])
 
 ---
 
-### T4.3 — S3 Bucket and Model Upload [COSTS MONEY — minimal]
+### T4.3 ΓÇö S3 Bucket and Model Upload [COSTS MONEY ΓÇö minimal]
 
 **Objective:** Create S3 bucket, upload trained models and traffic config.
 
@@ -1028,11 +1028,11 @@ aws s3 cp configs/traffic_config.yaml s3://flashbalanceai-{ACCOUNT_ID}/configs/t
 **Output:** S3 bucket with uploaded models  
 **Estimated Time:** 1 hour  
 **Acceptance Criteria:** `aws s3 ls s3://flashbalanceai-{ACCOUNT_ID}/models/` shows both model files.  
-**Costs Money?** Storage: First 5 GB free → **Free** for our use.
+**Costs Money?** Storage: First 5 GB free ΓåÆ **Free** for our use.
 
 ---
 
-### T4.4 — EC2 Backend Instances and Auto Scaling Group [COSTS MONEY]
+### T4.4 ΓÇö EC2 Backend Instances and Auto Scaling Group [COSTS MONEY]
 
 **Objective:** Launch 4 t2.micro EC2 instances running the Flask backend, inside an Auto Scaling Group.
 
@@ -1077,7 +1077,7 @@ aws autoscaling create-auto-scaling-group \
     --availability-zones us-east-1a us-east-1b \
     --default-cooldown 180
 ```
-4. **IMPORTANT — shut down after each session:**
+4. **IMPORTANT ΓÇö shut down after each session:**
 ```bash
 aws autoscaling update-auto-scaling-group \
     --auto-scaling-group-name FlashBalanceAI-ASG --desired-capacity 0 --min-size 0
@@ -1095,11 +1095,11 @@ aws ec2 delete-security-group --group-name FlashBalanceAI-Backend-SG
 **Output:** 4 running t2.micro instances, ASG created  
 **Estimated Time:** 4 hours  
 **Acceptance Criteria:** `aws ec2 describe-instances --filters Name=tag:aws:autoscaling:groupName,Values=FlashBalanceAI-ASG` shows 4 running instances. `curl http://{INSTANCE_IP}:5000/health` returns `{"status":"healthy"}`.  
-**Costs Money?** **YES** — t2.micro × 4 × hours running. Stay within free tier 750 hrs/month. Set desired-capacity=0 when not experimenting.
+**Costs Money?** **YES** ΓÇö t2.micro ├ù 4 ├ù hours running. Stay within free tier 750 hrs/month. Set desired-capacity=0 when not experimenting.
 
 ---
 
-### T4.5 — Application Load Balancer [COSTS MONEY]
+### T4.5 ΓÇö Application Load Balancer [COSTS MONEY]
 
 **Objective:** Create ALB with target group pointing to backend EC2 instances.
 
@@ -1128,7 +1128,7 @@ aws elbv2 create-target-group \
     --unhealthy-threshold-count 2
 ```
 3. Register all 4 EC2 instances as targets.
-4. Create listener: HTTP:80 → forward to target group.
+4. Create listener: HTTP:80 ΓåÆ forward to target group.
 5. Enable ALB access logs: `aws elbv2 modify-load-balancer-attributes --load-balancer-arn <ARN> --attributes Key=access_logs.s3.enabled,Value=true Key=access_logs.s3.bucket,Value=flashbalanceai-{ACCOUNT_ID} Key=access_logs.s3.prefix,Value=logs/alb`
 6. Save ALB DNS name to `configs/aws_config.yaml` as `alb_dns`.
 7. **Test:** JMeter targeting `http://{ALB_DNS}/product/1` directly (no API Gateway required).
@@ -1143,20 +1143,20 @@ aws autoscaling update-auto-scaling-group \
     --desired-capacity 0 --min-size 0
 ```
 
-**⚠️ COST NOTE:** ALB is NOT free tier. $0.0225/hr fixed + LCU charges.
-- Active during experiments only: ~4 hrs/day × 14 experiment days = 56 hrs → **~$1.30 total fixed** (+ LCU ~$0.50 estimated).
-- If left running 24/7 for 30 days: ~$16.20 — **do not leave running overnight**.
+**ΓÜá∩╕Å COST NOTE:** ALB is NOT free tier. $0.0225/hr fixed + LCU charges.
+- Active during experiments only: ~4 hrs/day ├ù 14 experiment days = 56 hrs ΓåÆ **~$1.30 total fixed** (+ LCU ~$0.50 estimated).
+- If left running 24/7 for 30 days: ~$16.20 ΓÇö **do not leave running overnight**.
 
 **Dependencies:** T4.4
 **Tool:** AWS ALB, AWS CLI
 **Output:** ALB DNS name, target group ARN, access logs enabled
 **Estimated Time:** 2 hours
 **Acceptance Criteria:** `aws elbv2 describe-target-health --target-group-arn <ARN>` shows all 4 targets healthy. `curl http://{ALB_DNS}/product/1` returns 200. ALB access logs appearing in S3 within 5 minutes of first request.
-**Costs Money?** **YES — $0.0225/hr fixed charge.** Delete after every experiment session.
+**Costs Money?** **YES ΓÇö $0.0225/hr fixed charge.** Delete after every experiment session.
 
 ---
 
-### T4.6 — DynamoDB Table [FREE TIER]
+### T4.6 ΓÇö DynamoDB Table [FREE TIER]
 
 **Objective:** Create routing_decisions table for audit logging.
 
@@ -1178,11 +1178,11 @@ aws dynamodb create-table \
 
 **Dependencies:** T4.1  
 **Estimated Time:** 30 minutes  
-**Costs Money?** On-demand DynamoDB: first 25 GB and 200M requests free → **Free** for our use.
+**Costs Money?** On-demand DynamoDB: first 25 GB and 200M requests free ΓåÆ **Free** for our use.
 
 ---
 
-### T4.7 — SageMaker Training (Optional Fallback) [COSTS MONEY — USE ONLY IF LOCAL FAILS]
+### T4.7 ΓÇö SageMaker Training (Optional Fallback) [COSTS MONEY ΓÇö USE ONLY IF LOCAL FAILS]
 
 **Objective:** Use SageMaker only if local laptop training AND Google Colab both fail to produce a converged PPO model within the available time.
 
@@ -1190,11 +1190,11 @@ aws dynamodb create-table \
 - Local laptop training (T3.1) does not complete 2M steps within 8 hours, AND
 - Google Colab (free) is unavailable or produces numerical instability
 
-> **Preferred alternatives in order:** (1) Laptop CPU (~3–4 hrs for 2M steps), (2) Google Colab free GPU/TPU (~1–2 hrs), (3) SageMaker ml.t2.medium (~$0.20–$0.50). Do not provision SageMaker unless the team has explicitly confirmed both (1) and (2) are insufficient.
+> **Preferred alternatives in order:** (1) Laptop CPU (~3ΓÇô4 hrs for 2M steps), (2) Google Colab free GPU/TPU (~1ΓÇô2 hrs), (3) SageMaker ml.t2.medium (~$0.20ΓÇô$0.50). Do not provision SageMaker unless the team has explicitly confirmed both (1) and (2) are insufficient.
 
 **Steps (if needed):**
-1. Open SageMaker Console → Notebook Instances → Create notebook instance.
-2. Instance type: **ml.t2.medium** (2 vCPU, 4 GB RAM) — cheapest available.
+1. Open SageMaker Console ΓåÆ Notebook Instances ΓåÆ Create notebook instance.
+2. Instance type: **ml.t2.medium** (2 vCPU, 4 GB RAM) ΓÇö cheapest available.
 3. EBS volume: 10 GB gp2.
 4. IAM role: `FlashBalanceAI-SageMaker-Role` (created in T4.2).
 5. Clone project repo into the notebook.
@@ -1208,8 +1208,8 @@ aws sagemaker stop-notebook-instance --notebook-instance-name FlashBalanceAI-Tra
 **How to delete:** `aws sagemaker delete-notebook-instance --notebook-instance-name FlashBalanceAI-Training` (must be stopped first).
 
 **Dependencies:** T4.3, T3.1 (training script ready)  
-**Estimated Time:** 1 hour setup + 4–5 hours training  
-**Costs Money?** **YES — $0.046/hr × 5 hrs = $0.23.** Stop immediately after training.  
+**Estimated Time:** 1 hour setup + 4ΓÇô5 hours training  
+**Costs Money?** **YES ΓÇö $0.046/hr ├ù 5 hrs = $0.23.** Stop immediately after training.  
 **Safer alternative:** Use Google Colab (free, Python 3.10 compatible) or team member's laptop with 16GB RAM.
 
 ---
@@ -1217,4 +1217,4 @@ aws sagemaker stop-notebook-instance --notebook-instance-name FlashBalanceAI-Tra
 **End of Part 1**
 
 *Continue reading `IMPLEMENTATION_PLAN_PART2.md` for:*
-*Phase 5 (AWS Integration) · Phase 6 (Experiments E1–E10) · Phase 7 (Statistical Validation) · Phase 8 (Paper Preparation) · Phase 9 (Demo/Teardown) · Full Timeline Table*
+*Phase 5 (AWS Integration) ┬╖ Phase 6 (Experiments E1ΓÇôE10) ┬╖ Phase 7 (Statistical Validation) ┬╖ Phase 8 (Paper Preparation) ┬╖ Phase 9 (Demo/Teardown) ┬╖ Full Timeline Table*

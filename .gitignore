@@ -1,0 +1,109 @@
+﻿# ============================================================
+# .gitignore — FlashBalanceAI
+# DRL_Cloud_Load_Balancing_Cloud_Project_2026
+# ============================================================
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.pyd
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# --- Virtual environments ---
+.venv/
+venv/
+env/
+ENV/
+.env
+*.env
+
+# --- Jupyter ---
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# --- IDE / editor ---
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# --- Testing ---
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+*.coveragerc
+
+# --- ML / model artefacts ---
+# (models/ are uploaded to S3; do not commit large binaries to git)
+models/
+*.zip
+*.pkl
+*.pt
+*.pth
+*.h5
+*.ckpt
+tensorboard_logs/
+tb_logs/
+
+# --- Experiment results ---
+# Raw CSVs and figures are stored in experiments/results/ locally
+# and synced to S3 -- track only the .gitkeep placeholder
+experiments/results/**
+experiments/analysis/**
+!experiments/results/.gitkeep
+!experiments/analysis/.gitkeep
+
+# --- AWS / secrets ---
+# NEVER commit credentials, keys, or account-specific values
+.aws/
+aws_credentials
+*.pem
+*.key
+*.crt
+*.p12
+.env.local
+.env.production
+secrets.yaml
+secrets.json
+
+# --- JMeter ---
+*.jtl
+jmeter.log
+
+# --- Temporary / OS ---
+*.log
+*.tmp
+*.bak
+*.orig
+tmp/
+temp/
+
+# --- Dataset (large binary files -- fetch separately) ---
+dataset/alibaba_cluster_trace/*.csv
+dataset/alibaba_cluster_trace/*.gz
+dataset/alibaba_cluster_trace/*.tar
+
+# --- CloudFormation generated outputs ---
+infra/cloudformation/*.output.json

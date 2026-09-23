@@ -1,0 +1,42 @@
+# PPO Agent Hyperparameters — FlashBalanceAI
+# Source: IMPLEMENTATION_PLAN_PART1.md T3.1 / ADR-001 D8
+# These are the locked initial values. Hyperparameter tuning is permitted
+# on validation seeds (112–126) only. Do not change after test runs begin.
+#
+# Reference: Schulman et al. (2017) PPO paper; Stable-Baselines3 v2.3.0 defaults.
+
+# --- Optimiser ---
+learning_rate: 0.0003          # Adam optimiser learning rate
+
+# --- Rollout & update ---
+n_steps: 2048                  # Steps per rollout buffer (per env) before update
+batch_size: 64                 # Mini-batch size for PPO update
+n_epochs: 10                   # Number of gradient update epochs per rollout
+total_timesteps: 2000000       # Total environment steps for training
+
+# --- PPO-specific ---
+clip_range: 0.2                # Clipping parameter ε (prevents large policy updates)
+gae_lambda: 0.95               # GAE λ for advantage estimation
+gamma: 0.99                    # Discount factor (long-horizon optimisation)
+ent_coef: 0.01                 # Entropy coefficient (encourages exploration)
+vf_coef: 0.5                   # Value function loss coefficient
+
+# --- Network architecture ---
+net_arch: [64, 64]             # Hidden layer sizes for both actor and critic MLPs
+
+# --- Parallel environments ---
+n_envs: 4                      # Number of vectorised environments during training
+
+# --- Seeds (per ADR-001 D18) ---
+seed_train: 42                 # Training seed
+seed_val: 43                   # Validation seed (EvalCallback)
+# NOTE: Test seeds 127–141 must NOT be used here
+
+# --- Checkpointing ---
+checkpoint_freq: 100000        # Save checkpoint every N steps
+eval_freq: 50000               # Evaluate every N steps
+n_eval_episodes: 3             # Episodes per evaluation
+
+# --- Save paths ---
+save_dir: "models/ppo"
+tensorboard_log: "models/ppo/tb_logs"

@@ -1,0 +1,66 @@
+# AWS Resource Configuration — FlashBalanceAI
+# Source: IMPLEMENTATION_PLAN_PART1.md T4.x / PRD §12 / ADR-001 D10–D11
+#
+# IMPORTANT: This file contains resource NAME TEMPLATES and region config only.
+# Actual ARNs, IPs, and account-specific values are populated at deploy time.
+# Do NOT commit real credentials, access keys, or secret values to this file.
+# Use environment variables or AWS SSM Parameter Store for secrets.
+#
+# Populate the placeholder values (marked TODO) before running Phase 4.
+
+# --- Region ---
+region: "us-east-1"            # ADR-001 D10 — locked; do not change
+
+# --- S3 ---
+s3_bucket: "flashbalanceai-TODO_ACCOUNT_ID"   # Replace TODO_ACCOUNT_ID with 12-digit AWS account ID
+s3_model_prefix: "models/"
+s3_state_key: "state/current.json"
+s3_results_prefix: "results/"
+
+# --- EC2 / ASG ---
+asg_name: "FlashBalanceAI-ASG"
+instance_type: "t2.micro"      # ADR-001 D11 — locked
+n_backend_instances: 4         # ADR-001 D4/D11 — locked (N=4)
+asg_min: 2
+asg_desired: 4
+asg_max: 8
+asg_cooldown_seconds: 180
+
+# --- ALB (populated at deploy time; delete between experiment sessions) ---
+# alb_arn: "TODO — populated by deploy.py"
+# alb_dns: "TODO — populated by deploy.py"
+# target_group_arn: "TODO — populated by deploy.py"
+
+# --- EC2 Inference Server ---
+# inference_server_ip: "TODO — populated at launch"
+inference_server_port: 6000
+inference_model_key: "models/ppo_flash_v1.zip"
+
+# --- Lambda functions ---
+lambda_state_collector_name: "FlashBalanceAI-StateCollector"
+lambda_inference_coordinator_name: "FlashBalanceAI-InferenceCoordinator"
+lambda_scaling_trigger_name: "FlashBalanceAI-ScalingTrigger"
+lambda_memory_mb: 128
+lambda_timeout_seconds: 15
+lambda_runtime: "python3.11"
+
+# --- DynamoDB ---
+dynamodb_table_name: "routing_decisions"
+
+# --- IAM ---
+lambda_role_name: "FlashBalanceAI-Lambda-Role"
+ec2_role_name: "FlashBalanceAI-EC2-Role"
+ec2_instance_profile_name: "FlashBalanceAI-EC2-Profile"
+
+# --- CloudWatch ---
+cloudwatch_namespace: "FlashBalanceAI/Instances"
+cloudwatch_log_retention_days: 7   # Cost control — keep logs 7 days only
+
+# --- CloudWatch Alarms ---
+cpu_high_threshold: 70          # % CPU — scale-out alarm threshold
+cpu_high_periods: 2             # consecutive evaluation periods before alarm fires
+cpu_high_period_seconds: 30
+cpu_low_threshold: 30           # % CPU — scale-in alarm threshold
+cpu_low_periods: 5
+billing_alarm_warning_usd: 5    # ADR-001 D22 — billing alarm at $5
+billing_alarm_action_usd: 15    # ADR-001 D22 — hard ceiling at $15
