@@ -2,6 +2,7 @@ import pytest
 import threading
 from backend.app import app, MAX_CONNECTIONS, BASE_LATENCY_MS
 
+
 @pytest.fixture
 def client():
     app.config['TESTING'] = True

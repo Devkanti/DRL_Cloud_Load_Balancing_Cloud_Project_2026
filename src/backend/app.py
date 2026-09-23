@@ -2,7 +2,6 @@
 Flask backend server simulating an EC2 instance.
 Tracks CPU utilization, active connections, and request queue.
 """
-
 import time
 import threading
 import uuid
