@@ -110,115 +110,122 @@ aws events put-rule \
 
 ---
 
-### T5.2 — PPO Inference Lambda [CRITICAL PATH][COSTS MONEY — minimal]
+### T5.2 — PPO Inference Server + Inference Coordinator Lambda [CRITICAL PATH]
 
-**Objective:** Lambda function that reads the current state from S3, runs PPO policy inference, and updates ALB target weights every 100ms.
+**Objective:** Deploy the PPO inference EC2 server and a lightweight Lambda coordinator that reads state from S3, calls the inference server, updates ALB weights, and logs to DynamoDB every 30s.
 
-**Steps:**
-1. Create `src/aws/ppo_inference.py`:
+> **Architecture decision (from cost review 2026-08-20):** Pure Lambda inference is NOT used. SB3 + PyTorch unzipped is ~300 MB, exceeding Lambda's 250 MB unzipped package limit. The EC2 inference server approach is the confirmed primary path. See PRD §12.2 and ADR-001 D14.
+
+**Component A — EC2 Inference Server (`src/aws/inference_server.py`):**
 ```python
-import boto3, json, os, numpy as np, time
-
-s3    = boto3.client('s3')
-elbv2 = boto3.client('elbv2')
-ddb   = boto3.resource('dynamodb').Table('routing_decisions')
-BUCKET   = os.environ['S3_BUCKET']
-TG_ARN   = os.environ['TARGET_GROUP_ARN']
-N        = int(os.environ.get('N_INSTANCES', '4'))
-MODEL_PATH = '/tmp/ppo_model'
-
-# Cold-start: load model once per Lambda container
-_model = None
-def _get_model():
-    global _model
-    if _model is None:
-        import zipfile
-        s3.download_file(BUCKET, 'models/ppo_flash_v1.zip', '/tmp/ppo_model.zip')
-        with zipfile.ZipFile('/tmp/ppo_model.zip', 'r') as z:
-            z.extractall('/tmp/ppo_model/')
-        from stable_baselines3 import PPO
-        _model = PPO.load('/tmp/ppo_model/ppo_flash_v1')
-    return _model
-
-def lambda_handler(event, context):
-    # Read state
-    obj = s3.get_object(Bucket=BUCKET, Key='state/current.json')
-    state_data = json.loads(obj['Body'].read())
-    state = np.array(state_data['state'], dtype=np.float32)
-
-    # Inference
-    model = _get_model()
-    action, _ = model.predict(state, deterministic=True)
-    action = int(action)
-
-    # Update ALB weights: 90% traffic to chosen instance, 10% distributed
-    weights = [5] * N
-    weights[action] = 40  # higher weight to selected instance
-    # Note: ALB uses integer weights 1-999
-    # Update each target individually
-    resp = elbv2.describe_target_health(TargetGroupArn=TG_ARN)
-    targets = [t['Target'] for t in resp['TargetHealthDescriptions']
-               if t['TargetHealth']['State'] == 'healthy']
-
-    for i, target in enumerate(targets[:N]):
-        elbv2.modify_target_group_attributes(
-            TargetGroupArn=TG_ARN,
-            Attributes=[{'Key': 'load_balancing.algorithm.type',
-                         'Value': 'least_outstanding_requests'}]
-        )
-
-    # Log to DynamoDB
-    ddb.put_item(Item={
-        'timestamp': str(time.time()),
-        'experiment_id': os.environ.get('EXPERIMENT_ID', 'default'),
-        'action': action,
-        'state': json.dumps(state.tolist()),
-        'arrival_rate': float(state[-3])
-    })
-
-    return {'statusCode': 200, 'action': action}
-```
-2. Package with SB3 dependency layer:
-```bash
-# SB3 is too large for a zip (300MB+); use Lambda Layer approach
-# Option A: Lambda Layer with SB3 pre-installed
-# Option B (RECOMMENDED): Use a dedicated EC2 t2.micro as inference server
-#   to avoid Lambda 250MB unzipped size limit
-
-# EC2 inference server (simpler, cost-controlled):
-# - 1 t2.micro EC2 instance running ppo_inference_server.py (Flask)
-# - Polled by ALB every 100ms via internal HTTP call
-# - Stop this instance when not experimenting
-```
-3. **Recommended approach — EC2 inference server** (avoids Lambda size limits):
-```python
-# src/aws/inference_server.py — runs on EC2 t2.micro
-from flask import Flask, jsonify
-import boto3, numpy as np, json
+# Runs on a dedicated t2.micro EC2 instance.
+# Model is loaded from S3 at startup and held in memory.
+from flask import Flask, request, jsonify
+import boto3, numpy as np, json, os
 from stable_baselines3 import PPO
 
 app = Flask(__name__)
-model = PPO.load('ppo_flash_v1')  # loaded at startup from S3
-elbv2 = boto3.client('elbv2')
+BUCKET = os.environ['S3_BUCKET']
+MODEL_KEY = os.environ.get('MODEL_KEY', 'models/ppo_flash_v1.zip')
+N = int(os.environ.get('N_INSTANCES', '4'))
+
+# Load model at startup — not per-request
+s3 = boto3.client('s3')
+s3.download_file(BUCKET, MODEL_KEY, '/tmp/ppo_model.zip')
+model = PPO.load('/tmp/ppo_model')  # SB3 load from zip path
+print(f"PPO model loaded. Ready to serve inference on port 6000.")
+
+@app.route('/health')
+def health():
+    return jsonify({'status': 'healthy', 'model': MODEL_KEY}), 200
 
 @app.route('/infer', methods=['POST'])
 def infer():
     data = request.json
     state = np.array(data['state'], dtype=np.float32)
     action, _ = model.predict(state, deterministic=True)
-    return jsonify({'action': int(action)})
+    return jsonify({'action': int(action), 'n_instances': N}), 200
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=6000)
 ```
-4. A separate Lambda (lightweight, < 10MB) calls the inference EC2 every 30s and updates ALB.
+Deploy: start this server on the inference t2.micro EC2 instance at startup via systemd or UserData.
 
-**Dependencies:** T5.1, T4.3  
-**Tool:** AWS Lambda or EC2 (t2.micro), boto3, SB3  
-**Output:** PPO inference updating ALB routing every 30s  
-**Estimated Time:** 6 hours  
-**Acceptance Criteria:** `aws s3 cp s3://.../state/current.json -` shows state being updated. CloudWatch shows `RequestCount` shifting between instances after action is taken.  
-**Costs Money?** EC2 approach: 1 additional t2.micro → counted toward free tier. Lambda layer: free.
+**Component B — Inference Coordinator Lambda (`src/aws/inference_coordinator.py`):**
+```python
+# Lightweight Lambda — does NOT contain SB3. < 5 MB package.
+import boto3, json, os, requests, time
+
+s3    = boto3.client('s3')
+elbv2 = boto3.client('elbv2')
+ddb   = boto3.resource('dynamodb').Table('routing_decisions')
+BUCKET          = os.environ['S3_BUCKET']
+TG_ARN          = os.environ['TARGET_GROUP_ARN']
+INFERENCE_URL   = os.environ['INFERENCE_SERVER_URL']  # http://{inference_ec2_ip}:6000/infer
+N               = int(os.environ.get('N_INSTANCES', '4'))
+EXPERIMENT_ID   = os.environ.get('EXPERIMENT_ID', 'default')
+
+def lambda_handler(event, context):
+    # 1. Read current state from S3
+    obj = s3.get_object(Bucket=BUCKET, Key='state/current.json')
+    state_data = json.loads(obj['Body'].read())
+    state = state_data['state']  # 23-element list
+
+    # 2. Call inference server
+    resp = requests.post(INFERENCE_URL, json={'state': state}, timeout=3)
+    action = resp.json()['action']
+
+    # 3. Update ALB target group weights
+    # Weighted routing: chosen instance gets weight 40, others get 5
+    tg_resp = elbv2.describe_target_health(TargetGroupArn=TG_ARN)
+    healthy_targets = [t['Target']['Id'] for t in tg_resp['TargetHealthDescriptions']
+                       if t['TargetHealth']['State'] == 'healthy']
+    new_targets = []
+    for i, tid in enumerate(healthy_targets[:N]):
+        weight = 40 if i == action else 5
+        new_targets.append({'Id': tid, 'Port': 5000, 'Weight': weight})
+    if new_targets:
+        elbv2.register_targets(TargetGroupArn=TG_ARN, Targets=new_targets)
+
+    # 4. Log to DynamoDB
+    ddb.put_item(Item={
+        'timestamp': str(time.time()),
+        'experiment_id': EXPERIMENT_ID,
+        'action': str(action),
+        'arrival_rate': str(state[-3]),
+        'state_snapshot': json.dumps(state[:4])  # CPU utils only (compact log)
+    })
+
+    return {'statusCode': 200, 'action': action}
+```
+Deploy:
+```bash
+zip coordinator_lambda.zip inference_coordinator.py
+# Add requests library layer (AWS public layer or pip install requests -t .)
+aws lambda create-function \
+    --function-name FlashBalanceAI-InferenceCoordinator \
+    --runtime python3.11 \
+    --handler inference_coordinator.lambda_handler \
+    --role arn:aws:iam::{ACCOUNT_ID}:role/FlashBalanceAI-Lambda-Role \
+    --zip-file fileb://coordinator_lambda.zip \
+    --timeout 10 \
+    --memory-size 128 \
+    --environment Variables="{S3_BUCKET=...,TARGET_GROUP_ARN=...,\
+INFERENCE_SERVER_URL=http://{INFERENCE_EC2_IP}:6000/infer,N_INSTANCES=4,\
+EXPERIMENT_ID=default}"
+```
+Trigger: EventBridge rule `rate(1 minute)` — every 30s not achievable without Step Functions; 1-minute polling is sufficient for the 30s state-collection cycle.
+
+**Dependencies:** T5.1, T4.3, T4.5 (ALB and inference EC2 must be running)
+**Tool:** EC2 (inference server), AWS Lambda (coordinator), boto3, requests
+**Output:** PPO inference updating ALB routing every 60s (EventBridge minimum); DynamoDB logging
+**Estimated Time:** 6 hours
+**Acceptance Criteria:**
+- Inference server health check: `curl http://{INFERENCE_EC2_IP}:6000/health` returns `{"status":"healthy"}`
+- Lambda coordinator invocation: `aws lambda invoke --function-name FlashBalanceAI-InferenceCoordinator out.json` returns `{"statusCode": 200, "action": 0-3}`
+- DynamoDB accumulating rows during a 5-minute test run
+- CloudWatch `RequestCount` per target shifts after action changes
+**Costs Money?** Lambda: free tier. EC2 inference server: 1 t2.micro, stopped between sessions.
 
 ---
 
@@ -286,7 +293,9 @@ aws cloudwatch put-metric-alarm \
 
 ### T5.4 — CloudWatch Custom Metrics from Backend [PARALLEL]
 
-**Objective:** Flask backend publishes custom metrics (QueueDepth, ResponseTimeEMA, RequestCount) to CloudWatch every 30s for the state collector to read.
+**Objective:** Flask backend publishes **exactly 2 custom metrics per instance** (QueueDepth, ResponseTimeEMA) to CloudWatch every 30s. Total: 8 custom metrics across 4 instances — within the 10-metric free tier.
+
+> **Cost note:** The original plan specified ~20 custom metrics. This revision reduces to 8 by deriving `active_conn` from the free ALB built-in `ActiveConnectionCount` metric and `arrival_rate` from the free ALB `RequestCount` metric. Only QueueDepth and ResponseTimeEMA require custom publishing.
 
 **Steps:**
 1. Add to `src/backend/app.py` a background thread that publishes metrics:
@@ -339,21 +348,23 @@ threading.Thread(target=publish_metrics, daemon=True).start()
 
 ### T5.5 — End-to-End Integration Test [CRITICAL PATH]
 
-**Objective:** Verify complete data flow: JMeter → API Gateway → ALB → EC2 → CloudWatch → Lambda → S3 → PPO inference → ALB update.
+**Objective:** Verify the complete revised data flow: JMeter → ALB (direct, no API Gateway) → EC2 → CloudWatch → Lambda State Collector → S3 → Lambda Inference Coordinator → EC2 Inference Server → ALB update → DynamoDB.
 
 **Steps:**
-1. Run a 5-minute JMeter test at baseline load (100 req/s) against ALB DNS.
-2. Check CloudWatch: metrics updating every 30s.
-3. Check S3: `state/current.json` contains plausible 23-element state vector.
-4. Check DynamoDB: routing_decisions table accumulating rows.
-5. Inspect ALB access logs: requests distributing across all 4 target instances.
-6. Monitor CloudWatch Dashboard for real-time view.
-7. **GATE CHECK:** All 6 components must be verified before running actual experiments.
+1. Confirm ALB is running; set ASG desired=4 and wait for all 4 targets to be `healthy`.
+2. Start EC2 inference server; confirm `/health` returns 200.
+3. Run a 5-minute JMeter test at baseline load (100 req/s) **targeting ALB DNS directly** — no API Gateway.
+4. Check CloudWatch `FlashBalanceAI/Instances`: QueueDepth and ResponseTimeEMA updating every 30s for all 4 instances.
+5. Check S3: `state/current.json` contains a valid 23-element state vector with CPU values in [0, 1].
+6. Check DynamoDB: `routing_decisions` table accumulating rows with valid `action` (0–3) values.
+7. Check ALB access logs: requests distributed across all 4 target instances (no single instance receiving > 80%).
+8. Check Lambda CloudWatch Logs: no errors in State Collector or Inference Coordinator for 5 consecutive invocations.
+9. **GATE CHECK:** All 6 data-flow components verified before experiments begin.
 
-**Dependencies:** T5.1, T5.2, T5.3, T5.4  
-**Estimated Time:** 3 hours  
-**Acceptance Criteria:** Traffic distributes to all 4 instances (no single instance receiving > 80% of requests). DynamoDB has entries. No Lambda errors in CloudWatch Logs.  
-**Costs Money?** Chargeable during test (ALB + EC2). Estimate: 1 hour test → ~$0.05.
+**Dependencies:** T5.1, T5.2, T5.3, T5.4
+**Estimated Time:** 3 hours
+**Acceptance Criteria:** All 6 checklist steps confirmed. Cost during 1-hour integration test: ~$0.04–$0.06 (ALB + EC2). Results documented in `decisions/integration_test_report.md`.
+**Costs Money?** **YES** — ALB + EC2 active. Estimate: ~$0.05 for a 1-hour test.
 
 ---
 

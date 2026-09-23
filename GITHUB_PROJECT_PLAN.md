@@ -5,7 +5,11 @@
 **Repository:** `DRL_Cloud_Load_Balancing_Cloud_Project_2026`  
 **Team:** Devkanti Sarkar (24BIT0162) · Agrima Gupta (24BIT0253) · Mohar Gorai · [4th member]  
 **Branch Model:** `main` ← `develop` ← `feature/*` (already implemented — not redesigned here)  
+<<<<<<< HEAD
+**Document Version:** 1.1 | **Last Revised:** 2026-08-20 (cost-optimisation update — see ADR-002)
+=======
 **Document Version:** 1.0 | **Date:** 2026-08-20
+>>>>>>> origin/main
 
 ---
 
@@ -43,7 +47,11 @@ All GitHub Issues must carry at least one **type** label, one **phase** label, a
 | `type:experiment` | `#d93f0b` | Requires running code against AWS or local env |
 | `type:analysis` | `#f9d0c4` | Statistical analysis, figure generation, notebook work |
 | `type:documentation` | `#0e8a16` | README, ADR, PRD updates, paper sections |
+<<<<<<< HEAD
+| `type:infrastructure` | `#5319e7` | AWS setup, IAM, deploy scripts |
+=======
 | `type:infrastructure` | `#5319e7` | AWS setup, IAM, CloudFormation, CI/CD |
+>>>>>>> origin/main
 | `type:testing` | `#fbca04` | Unit tests, integration tests, reproducibility verification |
 | `type:reproducibility` | `#bfd4f2` | Seed documentation, environment pinning, verification runs |
 
@@ -56,7 +64,11 @@ All GitHub Issues must carry at least one **type** label, one **phase** label, a
 | `phase:2-dataset` | Traffic generator, JMeter, Alibaba trace |
 | `phase:3-drl` | PPO/DQN agent implementation and training |
 | `phase:4-aws-deploy` | AWS resource provisioning |
+<<<<<<< HEAD
+| `phase:5-integration` | Lambda + EC2 inference integration, end-to-end pipeline |
+=======
 | `phase:5-integration` | Lambda integration, end-to-end pipeline |
+>>>>>>> origin/main
 | `phase:6-experiments` | Experiment runs E1–E10 |
 | `phase:7-results` | Statistical analysis, figures |
 | `phase:8-paper` | Conference paper writing |
@@ -72,9 +84,16 @@ All GitHub Issues must carry at least one **type** label, one **phase** label, a
 | `component:baselines` | RR, WRR, LC, Threshold baseline implementations |
 | `component:traffic-gen` | Synthetic traffic generator and JMeter plans |
 | `component:backend` | Flask EC2 backend server |
+<<<<<<< HEAD
+| `component:aws-lambda` | Lambda functions (state collector, inference coordinator, scaling trigger) |
+| `component:aws-infra` | EC2, ALB, ASG, CloudWatch, S3, DynamoDB — stop/delete between sessions |
+| `component:inference-server` | EC2 PPO inference server (`src/aws/inference_server.py`) |
+| `component:metrics` | MetricsCollector and Dash visualiser |
+=======
 | `component:aws-lambda` | Lambda functions (collector, inference, scaling) |
 | `component:aws-infra` | EC2, ALB, ASG, CloudWatch, S3, DynamoDB |
 | `component:metrics` | MetricsCollector and visualiser |
+>>>>>>> origin/main
 | `component:paper` | Conference paper manuscript sections |
 | `component:dataset` | Alibaba trace, synthetic dataset management |
 
@@ -87,6 +106,10 @@ All GitHub Issues must carry at least one **type** label, one **phase** label, a
 | `priority:normal` | Default priority |
 | `costs:aws-billing` | Will incur AWS charges when running |
 | `costs:free` | No AWS billing |
+<<<<<<< HEAD
+| `costs:delete-after-use` | AWS resource must be deleted (not just stopped) after each session |
+=======
+>>>>>>> origin/main
 | `gate:required` | This issue is a gate check — work downstream cannot start until it is closed |
 | `blocked` | Cannot proceed; blocking issue must be linked |
 | `good-first-issue` | Suitable as a first task for a new contributor |
@@ -97,7 +120,11 @@ All GitHub Issues must carry at least one **type** label, one **phase** label, a
 
 | # | Milestone | Phase(s) | Calendar Target | Exit Gate |
 |---|-----------|----------|-----------------|-----------|
+<<<<<<< HEAD
+| M0 | Design Lock & Repo Scaffold | 0 | Week 1 Day 1–2 | ADR-001.md signed by all 4 members; ADR-002 acknowledged; repo structure verified |
+=======
 | M0 | Design Lock & Repo Scaffold | 0 | Week 1 Day 1–2 | ADR-001.md signed by all 4 members; repo structure verified |
+>>>>>>> origin/main
 | M1 | Local Development Foundation | 1 | Week 1 Day 2–7 | All unit tests pass; Gymnasium env validated |
 | M2 | Dataset & Traffic Generation | 2 | Week 1 Day 3–7 | Traffic generator reproducible; JMeter plans run locally |
 | M3 | DRL Agents Trained & Locally Validated | 3 | Week 2 Day 5–8 | PPO reward converges; local eval gate check passes |
@@ -112,12 +139,51 @@ All GitHub Issues must carry at least one **type** label, one **phase** label, a
 
 ---
 
+<<<<<<< HEAD
+=======
 ---
 
+>>>>>>> origin/main
 ## Phase 0 — Design Lock & Repository Setup
 
 **Milestone:** M0 | **Duration:** 1–2 days | **All costs: Free**
 
+<<<<<<< HEAD
+**Objective:** Lock all architecture decisions and create the canonical repository structure.
+
+**Deliverables:** `decisions/ADR-001.md` (signed), `decisions/ADR-002.md` (acknowledged), fully scaffolded directories, `.gitignore`, branch structure.
+
+**Exit Criteria:** All 4 members signed ADR-001. ADR-002 cost review acknowledged. `git ls-tree -r --name-only HEAD` shows all required directories.
+
+---
+
+### Issue #1 — Write Architecture Decision Record (ADR-001) and Acknowledge Cost Review (ADR-002)
+
+**Labels:** `type:documentation` `phase:0-design` `priority:critical-path` `costs:free`  
+**Owner:** Devkanti Sarkar (lead) — all 4 members must sign off  
+**Estimated Effort:** 3 hours (meeting + write-up)  
+**Depends On:** Nothing  
+**Blocks:** All other issues
+
+**Description:**  
+Hold a synchronous meeting to resolve design disagreements. Document all locked decisions in `decisions/ADR-001.md`. Acknowledge the cost-optimisation review in `decisions/ADR-002.md`.
+
+**Key decisions to confirm:**
+- Primary DRL: PPO via SB3 v2.3.0
+- Baseline DRL: DQN (identical architecture)
+- AWS: ALB (required, delete between sessions), Lambda × 3 (free tier), EC2 × 5 t2.micro
+- **API Gateway: NOT in primary data flow** — JMeter → ALB DNS directly
+- **CloudFront: REMOVED** — Dash dashboard runs locally
+- **SageMaker: optional last resort** — local laptop or Google Colab first
+- **Custom CloudWatch metrics: 8 only** (within free tier)
+- Inference: EC2 inference server, not Lambda (SB3 size limit)
+- Budget ceiling: $15 (to confirm)
+
+**Acceptance Criteria:**
+- [ ] `decisions/ADR-001.md` exists; all 4 sign-off rows show `[x]`
+- [ ] `decisions/ADR-002.md` exists; cost-review acknowledgement ticked by all 4
+- [ ] No unresolved design or cost questions remain open
+=======
 **Objective:** Lock all architecture decisions and create the canonical repository structure so every team member builds to the same specification.
 
 **Deliverables:** `decisions/ADR-001.md`, fully scaffolded repository directories, `.gitignore`, `README.md` stub, branch structure.
@@ -153,6 +219,7 @@ Hold a synchronous meeting to resolve any design disagreements from the three Ph
 - [ ] All 4 members have committed their acknowledgement (Git author name visible in log)
 - [ ] No unresolved design questions remain open
 - [ ] Document references PRD.md Sections 7–12 for full context
+>>>>>>> origin/main
 
 ---
 
@@ -161,6 +228,18 @@ Hold a synchronous meeting to resolve any design disagreements from the three Ph
 **Labels:** `type:implementation` `phase:0-design` `priority:critical-path` `costs:free` `good-first-issue`  
 **Owner:** Agrima Gupta  
 **Estimated Effort:** 2 hours  
+<<<<<<< HEAD
+**Depends On:** Issue #1  
+**Blocks:** Issues #3–#7
+
+**Description:**  
+Create the full canonical directory tree per `IMPLEMENTATION_PLAN_PART1.md` T0.2. Add `decisions/` directory (already exists with ADR-001/ADR-002). Include `src/aws/inference_server.py` and `src/aws/inference_coordinator.py` as placeholder files.
+
+**Acceptance Criteria:**
+- [ ] All `src/`, `configs/`, `experiments/`, `notebooks/`, `decisions/` directories present
+- [ ] `.gitignore` covers `*.pyc`, `__pycache__/`, `.env`, `*.jtl`, `models/*.zip`, `data/alibaba_trace/`
+- [ ] PR merged into `develop` with at least one reviewer
+=======
 **Depends On:** Issue #1 (ADR must be signed before structure is locked)  
 **Blocks:** Issues #3–#7
 
@@ -182,6 +261,7 @@ Create the full canonical directory tree as specified in `IMPLEMENTATION_PLAN_PA
 - [ ] `.gitignore` does not accidentally exclude source files
 - [ ] `configs/` YAML files contain valid (even if placeholder) content
 - [ ] PR merged into `develop` with at least one other member as reviewer
+>>>>>>> origin/main
 
 ---
 
@@ -189,22 +269,36 @@ Create the full canonical directory tree as specified in `IMPLEMENTATION_PLAN_PA
 
 **Milestone:** M1 | **Duration:** 5–7 days | **All costs: Free (local only)**
 
+<<<<<<< HEAD
+=======
 **Objective:** Build all core software components locally — Flask backend, Gymnasium environment, baseline load balancers, and metrics collection — before any AWS or DRL work begins.
 
 **Deliverables:** `src/backend/app.py`, `src/environment/flash_sale_env.py`, `src/baselines/` (4 classes), `src/metrics/collector.py`, `environment.yml`, `requirements.txt`, all passing unit tests.
 
 **Exit Criteria:** `pytest src/tests/ -v` passes with 0 failures. `check_env(FlashSaleEnv())` raises no errors. All 4 members can activate the conda env and run the verify command.
 
+>>>>>>> origin/main
 ---
 
 ### Issue #3 — Create Reproducible Python Environment
 
 **Labels:** `type:implementation` `phase:1-local-dev` `type:reproducibility` `priority:critical-path` `costs:free` `good-first-issue`  
+<<<<<<< HEAD
+**Owner:** All 4 members  
+=======
 **Owner:** All 4 members (each must verify on their own machine)  
+>>>>>>> origin/main
 **Estimated Effort:** 1 hour  
 **Depends On:** Issue #2  
 **Blocks:** Issues #4–#8
 
+<<<<<<< HEAD
+**Description:** Create conda env with pinned packages. Python 3.11 (not 3.12 — SB3 2.3.0 compatibility). Verify on all 4 machines.
+
+**Acceptance Criteria:**
+- [ ] `environment.yml` and `requirements.txt` committed
+- [ ] `python -c "import stable_baselines3; import gymnasium; print('OK')"` succeeds on all 4 machines
+=======
 **Description:**  
 Create a reproducible conda environment that all 4 team members can activate identically. Pin all package versions as specified in `IMPLEMENTATION_PLAN_PART1.md` T1.1.
 
@@ -220,6 +314,7 @@ Create a reproducible conda environment that all 4 team members can activate ide
 - [ ] `python -c "import stable_baselines3; import gymnasium; print('OK')"` succeeds on all 4 machines
 - [ ] Python version is exactly 3.11 (not 3.12 — SB3 compatibility confirmed on 3.11)
 - [ ] No version conflicts reported by `pip check`
+>>>>>>> origin/main
 
 ---
 
@@ -229,6 +324,16 @@ Create a reproducible conda environment that all 4 team members can activate ide
 **Owner:** Mohar Gorai  
 **Estimated Effort:** 2 hours  
 **Depends On:** Issue #3  
+<<<<<<< HEAD
+**Blocks:** Issue #9 (JMeter), Issue #17 (EC2 deployment)
+
+**Description:** `src/backend/app.py` — Flask server with `/health`, `/product/<pid>`, `/metrics` endpoints and configurable `BASE_LATENCY_MS`. Background thread publishes **exactly 2 custom CloudWatch metrics** per instance: `QueueDepth` and `ResponseTimeEMA` (within 10-metric free tier across 4 instances).
+
+**Acceptance Criteria:**
+- [ ] All 3 endpoints return HTTP 200 with valid JSON
+- [ ] 4 instances start on ports 5001–5004 without conflict
+- [ ] Background metrics thread publishes only `QueueDepth` and `ResponseTimeEMA` (not `RequestCount` — that comes from ALB built-in)
+=======
 **Blocks:** Issue #9 (JMeter plans), Issue #14 (EC2 deployment)
 
 **Description:**  
@@ -247,6 +352,7 @@ Create `src/backend/app.py` — a Flask HTTP server that simulates an EC2 produc
 - [ ] 4 instances start on ports 5001–5004 without port conflict
 - [ ] `src/backend/requirements_backend.txt` contains `flask==3.0.3 gunicorn==21.2.0`
 - [ ] PR includes a brief manual test log (curl output) as a comment
+>>>>>>> origin/main
 
 ---
 
@@ -255,6 +361,17 @@ Create `src/backend/app.py` — a Flask HTTP server that simulates an EC2 produc
 **Labels:** `type:implementation` `phase:1-local-dev` `component:environment` `priority:critical-path` `costs:free`  
 **Owner:** Devkanti Sarkar  
 **Estimated Effort:** 6 hours  
+<<<<<<< HEAD
+**Depends On:** Issue #3, Issue #8  
+**Blocks:** Issues #11–#12 (training)
+
+**Description:** `src/environment/flash_sale_env.py` — 23-dim state vector, discrete N=4 action space, four-component reward function. Unit tests: shape, action space, episode completion, reward range.
+
+**Acceptance Criteria:**
+- [ ] `pytest src/tests/test_environment.py -v` passes
+- [ ] `check_env(FlashSaleEnv())` raises no errors
+- [ ] Full episode (7800 steps) completes in < 10s
+=======
 **Depends On:** Issue #3, Issue #8 (traffic generator must exist first — can stub `generate_profile`)  
 **Blocks:** Issues #11–#12 (PPO/DQN training)
 
@@ -277,6 +394,7 @@ Create `src/environment/flash_sale_env.py` implementing `gymnasium.Env` with a 2
 - [ ] `stable_baselines3.common.env_checker.check_env(FlashSaleEnv())` raises no warnings or errors
 - [ ] One full episode (7800 steps) completes in < 10 seconds on a laptop
 - [ ] `reset(seed=42)` twice produces identical initial observations
+>>>>>>> origin/main
 
 ---
 
@@ -288,6 +406,13 @@ Create `src/environment/flash_sale_env.py` implementing `gymnasium.Env` with a 2
 **Depends On:** Issue #3  
 **Blocks:** Issue #12 (local evaluation)
 
+<<<<<<< HEAD
+**Description:** `src/baselines/` — RoundRobinLB, WeightedRoundRobinLB, LeastConnectionsLB, ThresholdAutoscaler. All expose `.select(state)` → int in [0, N-1].
+
+**Acceptance Criteria:**
+- [ ] `pytest src/tests/test_baselines.py -v` passes
+- [ ] All run 7800 steps in FlashSaleEnv without error
+=======
 **Description:**  
 Create software implementations of all four non-DRL baselines in `src/baselines/`. All must expose a `.select(state)` method returning an integer in `[0, N-1]`.
 
@@ -306,12 +431,25 @@ Create software implementations of all four non-DRL baselines in `src/baselines/
 - [ ] `pytest src/tests/test_baselines.py -v` passes (0 failures)
 - [ ] All baselines complete a full 7800-step episode in `FlashSaleEnv` without error
 - [ ] No hardcoded instance counts (N must be constructor-configurable)
+>>>>>>> origin/main
 
 ---
 
 ### Issue #7 — Implement Metrics Collection Module
 
 **Labels:** `type:implementation` `phase:1-local-dev` `component:metrics` `priority:high` `costs:free`  
+<<<<<<< HEAD
+**Owner:** Any available member  
+**Estimated Effort:** 2 hours  
+**Depends On:** Issue #3  
+**Blocks:** Issue #12
+
+**Description:** `src/metrics/collector.py` — MetricsCollector with `record_step()`, `compute_summary()` (mean, P95, P99, throughput, failure_rate, mean_cpu, total_reward), `save(path)`.
+
+**Acceptance Criteria:**
+- [ ] `pytest src/tests/test_metrics.py -v` passes
+- [ ] `save(path)` produces valid CSV readable by pandas
+=======
 **Owner:** All (any available member — ~2 hours)  
 **Estimated Effort:** 2 hours  
 **Depends On:** Issue #3  
@@ -331,6 +469,7 @@ Create `src/metrics/collector.py` with `MetricsCollector` class. Must record per
 - [ ] `pytest src/tests/test_metrics.py -v` passes
 - [ ] `compute_summary()` returns all required keys with numerically plausible values
 - [ ] CSV output is tab/comma separated and includes a header row
+>>>>>>> origin/main
 
 ---
 
@@ -338,12 +477,15 @@ Create `src/metrics/collector.py` with `MetricsCollector` class. Must record per
 
 **Milestone:** M2 | **Duration:** 3–4 days | **Parallel with Phase 1 after Issue #3**
 
+<<<<<<< HEAD
+=======
 **Objective:** Build the synthetic flash-sale traffic generator, JMeter test plans, and acquire/process the Alibaba supplementary dataset.
 
 **Deliverables:** `src/traffic/traffic_generator.py`, `configs/traffic_config.yaml`, JMeter `.jmx` files, `data/alibaba_processed.csv`, traffic profile plots in `notebooks/01_traffic_analysis.ipynb`.
 
 **Exit Criteria:** All traffic generator unit tests pass. Visual inspection of profile plots confirms correct phase transitions (warm-up → pre-burst → spike → peak → cooldown). JMeter completes a 13-minute local run against Flask backends.
 
+>>>>>>> origin/main
 ---
 
 ### Issue #8 — Implement Synthetic Flash-Sale Traffic Generator
@@ -352,6 +494,15 @@ Create `src/metrics/collector.py` with `MetricsCollector` class. Must record per
 **Owner:** Devkanti Sarkar  
 **Estimated Effort:** 4 hours  
 **Depends On:** Issue #3  
+<<<<<<< HEAD
+**Blocks:** Issue #5, Issues #11–#12
+
+**Description:** `src/traffic/traffic_generator.py` — `TrafficConfig` dataclass, `generate_profile()`, `generate_repeated_bursts()`. Scenarios: e1_baseline (1×), e2_10x, e3_50x, e4_100x, e6_noisy (2×, noise_std=0.40).
+
+**Acceptance Criteria:**
+- [ ] All 5 unit tests pass (length, baseline range, burst peak, reproducibility, different seeds)
+- [ ] Profile plots in `notebooks/01_traffic_analysis.ipynb` show correct phase transitions
+=======
 **Blocks:** Issue #5 (Gymnasium env), Issues #11–#12 (training)
 
 **Description:**  
@@ -372,6 +523,7 @@ Create `src/traffic/traffic_generator.py` with `TrafficConfig` dataclass and `ge
 - [ ] All 5 unit tests pass
 - [ ] Visual plot in `notebooks/01_traffic_analysis.ipynb` shows correct phase transitions for 10× and 50× scenarios
 - [ ] `generate_repeated_bursts(n_bursts=3)` produces concatenated profile of correct length
+>>>>>>> origin/main
 
 ---
 
@@ -380,6 +532,16 @@ Create `src/traffic/traffic_generator.py` with `TrafficConfig` dataclass and `ge
 **Labels:** `type:implementation` `phase:2-dataset` `component:traffic-gen` `priority:high` `costs:free`  
 **Owner:** Mohar Gorai  
 **Estimated Effort:** 3 hours  
+<<<<<<< HEAD
+**Depends On:** Issue #4  
+**Blocks:** Issues #25–#34 (experiment runs)
+
+**Description:** `src/traffic/jmeter_configs/` — 4 parameterised `.jmx` plans (10×, 50×, repeated bursts, noisy). JMeter targets `{ALB_DNS}` directly via `-Jhost=` property — **no API Gateway in any test plan**.
+
+**Acceptance Criteria:**
+- [ ] Each plan completes a 13-min local run against 4 Flask servers on ports 5001–5004
+- [ ] No hardcoded host/port; `-Jhost` property used throughout
+=======
 **Depends On:** Issue #4 (Flask backend must be runnable)  
 **Blocks:** Issues #19–#28 (experiment runs)
 
@@ -400,6 +562,7 @@ Create parameterised Apache JMeter 5.6.3 test plans for all experiment scenarios
 - [ ] Each `.jmx` file completes a 13-minute run against localhost (4 Flask servers on ports 5001–5004)
 - [ ] Output CSV has columns: `timeStamp`, `elapsed`, `label`, `responseCode`, `bytes`
 - [ ] No hardcoded host/port in plan XML
+>>>>>>> origin/main
 
 ---
 
@@ -409,6 +572,15 @@ Create parameterised Apache JMeter 5.6.3 test plans for all experiment scenarios
 **Owner:** Agrima Gupta  
 **Estimated Effort:** 2 hours  
 **Depends On:** Issue #3  
+<<<<<<< HEAD
+**Blocks:** Nothing critical
+
+**Description:** Download Alibaba Cluster Trace v2018; process to arrival-rate distribution; save `data/alibaba_processed.csv`. Supplementary only — NOT primary evaluation dataset.
+
+**Acceptance Criteria:**
+- [ ] Raw trace directory gitignored (not committed)
+- [ ] Notebook cell explicitly states: "Alibaba trace = batch jobs, supplementary use only"
+=======
 **Blocks:** Nothing critical (supplementary only)
 
 **Description:**  
@@ -428,6 +600,7 @@ Download Alibaba Cloud Cluster Trace v2018 from https://github.com/alibaba/clust
 - [ ] Per-minute arrival-rate distribution plot committed to notebook
 - [ ] Raw trace directory is gitignored (NOT committed to repo)
 - [ ] Notebook cell contains explicit comment: "Alibaba trace = batch jobs, supplementary use only"
+>>>>>>> origin/main
 
 ---
 
@@ -435,18 +608,33 @@ Download Alibaba Cloud Cluster Trace v2018 from https://github.com/alibaba/clust
 
 **Milestone:** M3 | **Duration:** 7–10 days | **Local only**
 
+<<<<<<< HEAD
+=======
 **Objective:** Train PPO and DQN agents to convergence on `FlashSaleEnv`, verify reward convergence, and run a local evaluation gate check before touching AWS.
 
 **Deliverables:** `models/ppo/ppo_flash_v1.zip`, `models/dqn/dqn_flash_v1.zip`, TensorBoard reward convergence curves, preliminary local results table in `notebooks/03_results_analysis.ipynb`.
 
 **Exit Criteria (gate check — mandatory before Phase 4):** PPO reward curve shows monotonic improvement. `model.predict(obs)` returns action in `[0, 3]` within 5ms. PPO outperforms Round Robin on P95 latency by ≥ 10% in local evaluation. No NaN/Inf values in any metric.
 
+>>>>>>> origin/main
 ---
 
 ### Issue #11 — Train PPO Agent
 
 **Labels:** `type:implementation` `phase:3-drl` `component:ppo-agent` `priority:critical-path` `costs:free`  
 **Owner:** Devkanti Sarkar  
+<<<<<<< HEAD
+**Estimated Effort:** 9 hours (5h impl + 4h training)  
+**Depends On:** Issue #5, Issue #8  
+**Blocks:** Issue #13 (gate check), Issue #21 (inference server)
+
+**Description:** `src/agents/ppo_agent.py` — SB3 PPO, 2M steps, 4 VecEnvs, EvalCallback, CheckpointCallback. Hyperparams from `configs/ppo_config.yaml`. Training: local laptop first (3–4 hrs), then Google Colab, then SageMaker as last resort.
+
+**Acceptance Criteria:**
+- [ ] TensorBoard shows reward converging (screenshot in `decisions/`)
+- [ ] `model.predict(obs)` returns int in [0,3] within 5ms
+- [ ] Final model saved as `models/ppo/ppo_flash_v1.zip`
+=======
 **Estimated Effort:** 9 hours (5h implementation + 4h training)  
 **Depends On:** Issue #5 (environment), Issue #8 (traffic generator)  
 **Blocks:** Issue #13 (local evaluation), Issue #17 (PPO inference Lambda)
@@ -469,6 +657,7 @@ Create `src/agents/ppo_agent.py` with `train_ppo()` and `load_ppo()` functions u
 - [ ] `model.predict(obs)` returns integer in `[0, 3]` within 5ms
 - [ ] Final model saved as `models/ppo/ppo_flash_v1.zip`
 - [ ] `pytest src/tests/test_ppo_agent.py -v` passes
+>>>>>>> origin/main
 
 ---
 
@@ -476,6 +665,17 @@ Create `src/agents/ppo_agent.py` with `train_ppo()` and `load_ppo()` functions u
 
 **Labels:** `type:implementation` `phase:3-drl` `component:dqn-agent` `priority:high` `costs:free`  
 **Owner:** Agrima Gupta  
+<<<<<<< HEAD
+**Estimated Effort:** 9 hours (4h impl + 5h training)  
+**Depends On:** Issue #5 (env frozen), Issue #11 started  
+**Blocks:** Issue #13
+
+**Description:** `src/agents/dqn_agent.py` — SB3 DQN, identical architecture to PPO, same test seeds.
+
+**Acceptance Criteria:**
+- [ ] DQN training completes; final model `models/dqn/dqn_flash_v1.zip`
+- [ ] Environment version matches PPO training commit exactly
+=======
 **Estimated Effort:** 9 hours (4h implementation + 5h training)  
 **Depends On:** Issue #5 (environment must be frozen before DQN training starts), Issue #11 started  
 **Blocks:** Issue #13 (local evaluation)
@@ -495,12 +695,26 @@ Create `src/agents/dqn_agent.py` using Stable-Baselines3 DQN. Train on identical
 - [ ] TensorBoard shows reward improvement over training steps
 - [ ] Final model saved as `models/dqn/dqn_flash_v1.zip`
 - [ ] `pytest src/tests/test_dqn_agent.py -v` passes
+>>>>>>> origin/main
 
 ---
 
 ### Issue #13 — Local Evaluation Gate Check (All 6 Algorithms)
 
 **Labels:** `type:experiment` `phase:3-drl` `priority:critical-path` `gate:required` `costs:free`  
+<<<<<<< HEAD
+**Owner:** All 4 members  
+**Estimated Effort:** 4 hours  
+**Depends On:** Issues #11, #12, #6, #7  
+**Blocks:** Issue #14 (AWS deployment)
+
+**Description:** Run PPO, DQN, RR, WRR, LC, Threshold on test seeds 127–131 in `FlashSaleEnv`. Gate pass: PPO ≥ 10% P95 improvement over RR; no NaN; DQN differs from random.
+
+**Acceptance Criteria:**
+- [ ] All gate conditions pass
+- [ ] Preliminary results table committed to `experiments/analysis/`
+- [ ] Team explicitly agrees in issue comment that Phase 4 may begin
+=======
 **Owner:** All 4 members (collaborative notebook session)  
 **Estimated Effort:** 4 hours  
 **Depends On:** Issues #11, #12, #6, #7  
@@ -528,6 +742,7 @@ Run all 6 algorithms (PPO, DQN, RR, WRR, LC, Threshold) on test seeds 127–131 
 - [ ] Gate pass conditions 1–4 all satisfied
 - [ ] Preliminary table committed and linked in this issue's closing comment
 - [ ] Team explicitly agrees in a comment that Phase 4 may begin
+>>>>>>> origin/main
 
 ---
 
@@ -535,6 +750,9 @@ Run all 6 algorithms (PPO, DQN, RR, WRR, LC, Threshold) on test seeds 127–131 
 
 **Milestone:** M4 | **Duration:** 3–4 days | **⚠️ Some tasks incur AWS charges**
 
+<<<<<<< HEAD
+> **Cost discipline (ADR-002):** API Gateway is NOT provisioned. CloudFront is NOT provisioned. SageMaker is a last resort for training. ALB must be deleted (not stopped) between experiment phases. EC2 must be stopped (ASG desired=0) between sessions.
+=======
 **Objective:** Provision all required AWS resources safely, with billing alarms set before any chargeable resource is launched.
 
 **Deliverables:** Live AWS stack (EC2 ASG, ALB, Lambda×3, CloudWatch, S3, DynamoDB), IAM roles, billing alarm at $5.
@@ -542,6 +760,7 @@ Run all 6 algorithms (PPO, DQN, RR, WRR, LC, Threshold) on test seeds 127–131 
 **Exit Criteria:** All AWS resources exist and are reachable. `aws sts get-caller-identity` returns correct account. EC2 health checks pass. Billing alarm confirmed in CloudWatch console.
 
 > **⚠️ Safety Rule:** Issue #14 (billing alarm) must be merged and confirmed before any other Phase 4 issue is opened.
+>>>>>>> origin/main
 
 ---
 
@@ -550,6 +769,17 @@ Run all 6 algorithms (PPO, DQN, RR, WRR, LC, Threshold) on test seeds 127–131 
 **Labels:** `type:infrastructure` `phase:4-aws-deploy` `priority:critical-path` `gate:required` `costs:free`  
 **Owner:** Devkanti Sarkar  
 **Estimated Effort:** 2 hours  
+<<<<<<< HEAD
+**Depends On:** Issue #13  
+**Blocks:** All Phase 4 issues
+
+**Description:** Configure billing protection before any chargeable resources are launched. Billing alarm at $5 (warning) and $15 (action). AWS Budgets alert at $12/month. Confirm EC2 t2.micro quota ≥ 5.
+
+**Acceptance Criteria:**
+- [ ] Two billing alarms confirmed active in CloudWatch console
+- [ ] `aws sts get-caller-identity` returns correct account ID
+- [ ] EC2 quota ≥ 5 confirmed
+=======
 **Depends On:** Issue #13 (gate check must pass)  
 **Blocks:** All other Phase 4 issues
 
@@ -569,6 +799,7 @@ Configure the AWS student account with billing protection before any chargeable 
 - [ ] `aws sts get-caller-identity` returns correct account ID
 - [ ] EC2 quota ≥ 5 t2.micro instances confirmed
 - [ ] `configs/aws_config.yaml` committed (no credentials — region and resource name templates only)
+>>>>>>> origin/main
 
 ---
 
@@ -578,6 +809,15 @@ Configure the AWS student account with billing protection before any chargeable 
 **Owner:** Devkanti Sarkar  
 **Estimated Effort:** 2 hours  
 **Depends On:** Issue #14  
+<<<<<<< HEAD
+**Blocks:** Issues #16–#19
+
+**Description:** `src/aws/iam_setup.py` — create `FlashBalanceAI-Lambda-Role` and `FlashBalanceAI-EC2-Role` with least-privilege policies. No wildcard `*` permissions. Policy JSON documents committed to `decisions/iam_policies/`.
+
+**Acceptance Criteria:**
+- [ ] Both roles exist; `iam_setup.py` runs idempotently
+- [ ] No wildcard `*` permissions granted
+=======
 **Blocks:** Issues #16–#18 (all resource setup)
 
 **Description:**  
@@ -592,11 +832,24 @@ Create IAM roles following least-privilege principle. Implement in `src/aws/iam_
 - [ ] `src/aws/iam_setup.py` script creates roles idempotently (safe to re-run)
 - [ ] No wildcard `*` permissions granted
 - [ ] IAM policy JSON documents committed to `decisions/iam_policies/`
+>>>>>>> origin/main
 
 ---
 
 ### Issue #16 — Provision S3 Bucket and Upload Trained Models
 
+<<<<<<< HEAD
+**Labels:** `type:infrastructure` `phase:4-aws-deploy` `component:aws-infra` `priority:critical-path` `costs:free`  
+**Owner:** Agrima Gupta  
+**Estimated Effort:** 1 hour  
+**Depends On:** Issue #15, Issue #11  
+**Blocks:** Issues #17, #21
+
+**Description:** Create `flashbalanceai-{ACCOUNT_ID}` with versioning enabled, public access blocked. Upload `ppo_flash_v1.zip`, `dqn_flash_v1.zip`. Expected total: < 3 GB → free tier.
+
+**Acceptance Criteria:**
+- [ ] `aws s3 ls s3://flashbalanceai-{ACCOUNT_ID}/models/` shows both model zips
+=======
 **Labels:** `type:infrastructure` `phase:4-aws-deploy` `component:aws-infra` `priority:critical-path` `costs:aws-billing`  
 **Owner:** Agrima Gupta  
 **Estimated Effort:** 1 hour  
@@ -620,6 +873,7 @@ flashbalanceai-{ACCOUNT_ID}/
 - [ ] Bucket exists with versioning enabled and all public access blocked
 - [ ] `aws s3 ls s3://flashbalanceai-{ACCOUNT_ID}/models/` shows both model zips
 - [ ] `src/aws/deploy.py` contains bucket creation logic (idempotent)
+>>>>>>> origin/main
 
 ---
 
@@ -628,6 +882,16 @@ flashbalanceai-{ACCOUNT_ID}/
 **Labels:** `type:infrastructure` `phase:4-aws-deploy` `component:aws-infra` `priority:critical-path` `costs:aws-billing`  
 **Owner:** Mohar Gorai  
 **Estimated Effort:** 4 hours  
+<<<<<<< HEAD
+**Depends On:** Issue #15, Issue #4  
+**Blocks:** Issue #18 (ALB needs targets)
+
+**Description:** ASG `FlashBalanceAI-ASG`, min=2, desired=4, max=8. t2.micro instances with Flask backend via UserData. **Set desired=0, min=0 between sessions.** CloudWatch agent publishing `CPUUtilization`.
+
+**Acceptance Criteria:**
+- [ ] 4 instances healthy; `curl http://{IP}:5000/health` returns 200
+- [ ] ASG scale-out policy verified: CPU > 70% for 2×30s → +1 instance
+=======
 **Depends On:** Issue #15, Issue #4 (Flask backend must be ready for AMI/UserData)  
 **Blocks:** Issue #18 (ALB needs target instances)
 
@@ -646,11 +910,38 @@ Launch 4 t2.micro EC2 instances running the Flask backend via ASG. Configure Use
 - [ ] `curl http://{INSTANCE_IP}:5000/health` returns `{"status": "healthy"}`
 - [ ] CloudWatch agent publishing `CPUUtilization` for each instance
 - [ ] ASG scale-out policy: CPU > 70% for 2 periods → +1 instance; scale-in: CPU < 30% for 5 periods → -1
+>>>>>>> origin/main
 
 ---
 
 ### Issue #18 — Deploy Application Load Balancer
 
+<<<<<<< HEAD
+**Labels:** `type:infrastructure` `phase:4-aws-deploy` `component:aws-infra` `priority:critical-path` `costs:aws-billing` `costs:delete-after-use`  
+**Owner:** Mohar Gorai  
+**Estimated Effort:** 2 hours  
+**Depends On:** Issue #17  
+**Blocks:** Issue #20 (state collector Lambda)
+
+**Description:** Create `FlashBalanceAI-ALB` with target group `FlashBalanceAI-TG`. Enable ALB access logs to S3. **Delete ALB and target group after each experiment session** — $0.0225/hr applies even when idle.
+
+The `src/aws/deploy.py` script must support idempotent ALB creation so it can be re-created quickly before each experiment session.
+
+**How to delete (run after EVERY experiment session):**
+```bash
+aws elbv2 delete-load-balancer --load-balancer-arn <ARN>
+aws elbv2 delete-target-group --target-group-arn <ARN>
+aws autoscaling update-auto-scaling-group \
+    --auto-scaling-group-name FlashBalanceAI-ASG \
+    --desired-capacity 0 --min-size 0
+```
+
+**Acceptance Criteria:**
+- [ ] ALB DNS resolves; all 4 targets `healthy`
+- [ ] ALB access logs appearing in S3 within 5 minutes of first request
+- [ ] `src/aws/deploy.py` recreates ALB idempotently in < 5 minutes
+- [ ] Delete procedure tested successfully at least once
+=======
 **Labels:** `type:infrastructure` `phase:4-aws-deploy` `component:aws-infra` `priority:critical-path` `costs:aws-billing`  
 **Owner:** Mohar Gorai  
 **Estimated Effort:** 2 hours  
@@ -671,6 +962,7 @@ Create an Application Load Balancer (`FlashBalanceAI-ALB`) with a target group (
 - [ ] All 4 targets show `healthy` in target group
 - [ ] ALB access logs enabled to `s3://flashbalanceai-{ACCOUNT_ID}/logs/alb/`
 - [ ] `aws elbv2 describe-load-balancers` output saved to `decisions/aws_resource_ids.md`
+>>>>>>> origin/main
 
 ---
 
@@ -680,6 +972,14 @@ Create an Application Load Balancer (`FlashBalanceAI-ALB`) with a target group (
 **Owner:** Agrima Gupta  
 **Estimated Effort:** 0.5 hours  
 **Depends On:** Issue #14  
+<<<<<<< HEAD
+**Blocks:** Issue #21
+
+**Description:** `routing_decisions` table, PAY_PER_REQUEST, free tier. Partition key: `timestamp` (String), sort key: `experiment_id` (String).
+
+**Acceptance Criteria:**
+- [ ] `aws dynamodb describe-table --table-name routing_decisions` returns 200
+=======
 **Blocks:** Issue #21 (PPO inference Lambda writes to DynamoDB)
 
 **Description:**  
@@ -690,11 +990,15 @@ Create DynamoDB table `routing_decisions` for logging inference decisions during
 **Acceptance Criteria:**
 - [ ] Table exists: `aws dynamodb describe-table --table-name routing_decisions`
 - [ ] Table is in `PAY_PER_REQUEST` billing mode (Free Tier: 25 GB + 200M requests/month)
+>>>>>>> origin/main
 
 ---
 
 ## Phase 5 — AWS Integration & End-to-End Pipeline
 
+<<<<<<< HEAD
+**Milestone:** M5 | **Duration:** 5–7 days | **⚠️ Minimal charges during testing**
+=======
 **Milestone:** M5 | **Duration:** 5–7 days | **⚠️ Minimal AWS charges during testing**
 
 **Objective:** Deploy Lambda functions, connect CloudWatch state collection to PPO inference, and verify the complete data flow end-to-end before running experiments.
@@ -702,11 +1006,53 @@ Create DynamoDB table `routing_decisions` for logging inference decisions during
 **Deliverables:** 3 Lambda functions deployed, custom CloudWatch namespace `FlashBalanceAI/Instances` publishing, S3 state file updating every 30s, DynamoDB accumulating routing rows.
 
 **Exit Criteria (gate check — mandatory before Phase 6):** T5.5 integration test passes all 6 checks — traffic distributes to all 4 instances, no Lambda errors, DynamoDB has entries, no single instance receives > 80% of requests.
+>>>>>>> origin/main
 
 ---
 
 ### Issue #20 — Deploy CloudWatch State Collector Lambda
 
+<<<<<<< HEAD
+**Labels:** `type:implementation` `phase:5-integration` `component:aws-lambda` `priority:critical-path` `costs:free`  
+**Owner:** Agrima Gupta  
+**Estimated Effort:** 5 hours  
+**Depends On:** Issues #16, #17, #18  
+**Blocks:** Issue #21
+
+**Description:** Lambda `FlashBalanceAI-StateCollector` (128 MB, 15s timeout, Python 3.11). Reads **CPUUtilization (built-in) + 8 custom metrics (QueueDepth × 4, ResponseTimeEMA × 4)** + ALB built-in `ActiveConnectionCount` + ALB built-in `RequestCount`. Builds 23-dim state vector; writes `state/current.json` to S3. EventBridge trigger: `rate(1 minute)`.
+
+**Acceptance Criteria:**
+- [ ] `state/current.json` shows valid 23-element array with CPU values in [0, 1]
+- [ ] Lambda execution time < 5s; no errors in 5 consecutive invocations
+
+---
+
+### Issue #21 — Deploy PPO Inference Server and Inference Coordinator Lambda
+
+**Labels:** `type:implementation` `phase:5-integration` `component:inference-server` `component:aws-lambda` `priority:critical-path` `costs:aws-billing`  
+**Owner:** Devkanti Sarkar  
+**Estimated Effort:** 6 hours  
+**Depends On:** Issues #16, #18, #20  
+**Blocks:** Issue #24 (integration test)
+
+**Description (two components — confirmed per ADR-002 D14):**
+
+**Component A: EC2 Inference Server** (`src/aws/inference_server.py`)
+- Runs on dedicated t2.micro; loads PPO model from S3 at startup
+- Exposes `GET /health` and `POST /infer` (returns `{"action": int}`)
+- Started ≥ 60s before experiments; stopped between sessions
+
+**Component B: Lightweight Lambda Coordinator** (`src/aws/inference_coordinator.py`)
+- No SB3 dependency (< 5 MB); reads S3 state → `POST /infer` to EC2 → updates ALB weights → logs DynamoDB
+- EventBridge trigger: `rate(1 minute)`
+
+> **Why EC2, not Lambda:** SB3 + PyTorch ≈ 300 MB unzipped, exceeding Lambda's 250 MB limit. Pure Lambda inference is not architecturally viable.
+
+**Acceptance Criteria:**
+- [ ] `curl http://{INFERENCE_EC2_IP}:6000/health` returns `{"status":"healthy"}`
+- [ ] `aws lambda invoke --function-name FlashBalanceAI-InferenceCoordinator out.json` returns `{"action": 0-3}`
+- [ ] DynamoDB accumulating rows during 5-min test
+=======
 **Labels:** `type:implementation` `phase:5-integration` `component:aws-lambda` `priority:critical-path` `costs:aws-billing`  
 **Owner:** Agrima Gupta  
 **Estimated Effort:** 5 hours  
@@ -755,6 +1101,7 @@ Deploy `src/aws/inference_server.py` as a Flask application on a dedicated EC2 t
 - [ ] `/infer` endpoint returns an integer in `[0, 3]` for valid 23-dim input
 - [ ] DynamoDB `routing_decisions` table accumulates rows during operation
 - [ ] CloudWatch Logs show no errors for 5 consecutive inference cycles
+>>>>>>> origin/main
 
 ---
 
@@ -764,6 +1111,14 @@ Deploy `src/aws/inference_server.py` as a Flask application on a dedicated EC2 t
 **Owner:** Mohar Gorai  
 **Estimated Effort:** 3 hours  
 **Depends On:** Issues #20, #17  
+<<<<<<< HEAD
+**Blocks:** Issue #24
+
+**Description:** Lambda `FlashBalanceAI-ScalingTrigger` (128 MB). Handles proactive (`burst_indicator=1` → +2 instances) and reactive (CPU alarm → +1 instance) scaling. CloudWatch alarms: `HighCPU` (CPU > 70%, 2×30s) and `LowCPU` (CPU < 30%, 5×30s).
+
+**Acceptance Criteria:**
+- [ ] Manually raising CPU above 70% causes ASG desired capacity to increase within 120s
+=======
 **Blocks:** Issue #24 (integration test)
 
 **Description:**  
@@ -782,11 +1137,25 @@ Create and deploy `src/aws/scaling_trigger.py` as Lambda function `FlashBalanceA
 - [ ] Manually raising a test instance's CPU above 70% causes ASG desired capacity to increase within 120s
 - [ ] Lambda free tier usage confirmed (< 1M invocations/month)
 - [ ] Scale-in tested without disrupting active connections
+>>>>>>> origin/main
 
 ---
 
 ### Issue #23 — Add Custom CloudWatch Metrics Publishing to Flask Backend
 
+<<<<<<< HEAD
+**Labels:** `type:implementation` `phase:5-integration` `component:backend` `priority:high` `costs:free`  
+**Owner:** Mohar Gorai  
+**Estimated Effort:** 2 hours  
+**Depends On:** Issues #20, #4  
+**Blocks:** Issue #24
+
+**Description:** Flask backend background thread publishes **exactly 2 custom metrics per instance**: `QueueDepth` and `ResponseTimeEMA`. Total: 8 custom metrics across 4 instances — within the 10-metric free tier. `RequestCount` and `ActiveConnectionCount` are sourced from free ALB built-in metrics by the state collector; do NOT publish these as custom metrics.
+
+**Acceptance Criteria:**
+- [ ] CloudWatch `FlashBalanceAI/Instances` namespace shows exactly 2 metric names with 4 instance dimensions each
+- [ ] Custom metric count ≤ 10 (within free tier)
+=======
 **Labels:** `type:implementation` `phase:5-integration` `component:backend` `component:aws-lambda` `priority:high` `costs:free`  
 **Owner:** Mohar Gorai  
 **Estimated Effort:** 2 hours  
@@ -804,6 +1173,7 @@ Add a background metrics-publishing thread to `src/backend/app.py` that pushes `
 - [ ] CloudWatch console shows `FlashBalanceAI/Instances` namespace with 4 instance dimensions
 - [ ] Metrics update every 30s (confirmed via `aws cloudwatch get-metric-statistics`)
 - [ ] 8 metrics total (2 × 4 instances) — within Free Tier (10 custom metrics free)
+>>>>>>> origin/main
 
 ---
 
@@ -813,6 +1183,24 @@ Add a background metrics-publishing thread to `src/backend/app.py` that pushes `
 **Owner:** All 4 members  
 **Estimated Effort:** 3 hours  
 **Depends On:** Issues #20–#23  
+<<<<<<< HEAD
+**Blocks:** All Phase 6 experiment issues
+
+**Description:** 5-min JMeter test at 100 req/s targeting **ALB DNS directly** (no API Gateway). Verify 6 pipeline components simultaneously.
+
+**Verification checklist:**
+1. CloudWatch custom metrics updating every 30s
+2. S3 `state/current.json` valid 23-element array
+3. DynamoDB rows accumulating with valid actions (0–3)
+4. ALB access logs: traffic distributed across all 4 instances
+5. Lambda CloudWatch Logs: no errors in 5 consecutive invocations
+6. No single instance receiving > 80% of requests
+
+**Acceptance Criteria:**
+- [ ] All 6 checklist items confirmed with evidence
+- [ ] Results documented in `decisions/integration_test_report.md`
+- [ ] Test cost: ~$0.05 for 1-hour test
+=======
 **Blocks:** All Phase 6 experiment issues (none may start until this gate passes)
 
 **Description:**  
@@ -830,11 +1218,17 @@ Run a 5-minute JMeter test at baseline load (100 req/s) against the ALB DNS and 
 - [ ] All 6 checklist items confirmed and documented with evidence (CloudWatch screenshots, S3 JSON snippet, DynamoDB row count)
 - [ ] Test cost recorded: estimated ~$0.05 for 1 hour
 - [ ] Gate sign-off committed to `decisions/integration_test_report.md` by all 4 members
+>>>>>>> origin/main
 
 ---
 
 ## Phase 6 — Experimental Campaign
 
+<<<<<<< HEAD
+**Milestone:** M6 | **Duration:** 7–10 days | **⚠️ Primary cost phase (~$4–10 total with discipline)**
+
+> **Cost discipline per session:** Start ALB + EC2 → run experiments → delete ALB → stop EC2 (desired=0). Never leave ALB running overnight.
+=======
 **Milestone:** M6 | **Duration:** 7–10 days | **⚠️ Primary cost phase (~$8–18 total)**
 
 **Objective:** Execute experiments E1–E10 with the specified repetitions and collect all raw data. No analysis in this phase — data collection only.
@@ -844,12 +1238,18 @@ Run a 5-minute JMeter test at baseline load (100 req/s) against the ALB DNS and 
 **Exit Criteria:** Every experiment (E1–E10) has raw data files for the specified minimum repetitions. No file is empty or corrupted. All raw data is backed up to S3.
 
 > **⚠️ Research Integrity:** No results from these experiments may be reported in the paper until (a) the experiment has completed the minimum specified repetitions, (b) all raw data has been saved and committed, and (c) statistical analysis has been completed per Phase 7.
+>>>>>>> origin/main
 
 ---
 
 ### Issue #25 — E1: Baseline Traffic Calibration (1× Load)
 
 **Labels:** `type:experiment` `phase:6-experiments` `priority:critical-path` `costs:aws-billing`  
+<<<<<<< HEAD
+**Owner:** Agrima Gupta | **AWS Cost:** ~$0.25 | **Depends On:** Issue #24 | **Blocks:** Issues #26–#28
+
+**Description:** 100 req/s constant, 5 reps, seeds 127–131, 6 algorithms. JMeter targets ALB DNS directly. PPO and RR P95 difference < 20% (sanity check).
+=======
 **Owner:** Agrima Gupta  
 **Estimated Effort:** 4 hours | **AWS Cost:** ~$0.50  
 **Depends On:** Issue #24 (integration gate must pass)  
@@ -869,12 +1269,18 @@ Run all 6 algorithms at constant 100 req/s for 13 minutes each. Purpose: confirm
 - [ ] No run file is empty or < 100 rows
 - [ ] Raw data uploaded to `s3://flashbalanceai-{ACCOUNT_ID}/results/e1/`
 - [ ] PPO and RR P95 difference at baseline < 20% (sanity check — not a result claim)
+>>>>>>> origin/main
 
 ---
 
 ### Issue #26 — E2: 10× Traffic Spike (Primary Experiment)
 
 **Labels:** `type:experiment` `phase:6-experiments` `priority:critical-path` `costs:aws-billing`  
+<<<<<<< HEAD
+**Owner:** All 4 members | **AWS Cost:** ~$0.25 | **Depends On:** Issue #25 | **Blocks:** Issues #27–#33
+
+**Description:** peak_users=1000, 5 reps, seeds 132–136, 6 algorithms. Record ASG scaling event timestamps for E7.
+=======
 **Owner:** All 4 members  
 **Estimated Effort:** 6 hours | **AWS Cost:** ~$0.50  
 **Depends On:** Issue #25 (E1 must complete with no anomalies)  
@@ -896,12 +1302,23 @@ Primary experiment answering RQ1 (PPO vs Threshold) and RQ2 (PPO vs DQN). Traffi
 - [ ] CloudWatch metric exports for all 5 seeds committed to `experiments/results/e2/cloudwatch/`
 - [ ] ASG scaling event timestamps recorded for each run
 - [ ] Raw data uploaded to S3
+>>>>>>> origin/main
 
 ---
 
 ### Issue #27 — E3: 50× Traffic Spike (Stress Test)
 
 **Labels:** `type:experiment` `phase:6-experiments` `priority:high` `costs:aws-billing`  
+<<<<<<< HEAD
+**Owner:** All 4 members | **AWS Cost:** ~$0.30 | **Depends On:** Issue #26 | **Blocks:** Issues #28, #32
+
+---
+
+### Issue #28 — E4: 100× Traffic Spike (Conditional)
+
+**Labels:** `type:experiment` `phase:6-experiments` `priority:normal` `costs:aws-billing`  
+**Owner:** Devkanti Sarkar | **AWS Cost:** ~$0.15 | **Depends On:** Issue #27 (run only if E3 shows PPO P95 < 2000ms)
+=======
 **Owner:** All 4 members  
 **Estimated Effort:** 5 hours | **AWS Cost:** ~$0.60  
 **Depends On:** Issue #26 (E2 must show no infrastructure ceiling issues)  
@@ -937,12 +1354,16 @@ Upper bound experiment — run only if E3 succeeded. peak_users=10000, shortened
 **Acceptance Criteria:**
 - [ ] If run: 18 `.jtl` files committed to `experiments/results/e4/`
 - [ ] If not run: `experiments/results/e4/skipped.md` explaining the decision with E3 evidence
+>>>>>>> origin/main
 
 ---
 
 ### Issue #29 — E5: Repeated Flash-Sale Patterns
 
 **Labels:** `type:experiment` `phase:6-experiments` `priority:high` `costs:aws-billing`  
+<<<<<<< HEAD
+**Owner:** Mohar Gorai | **AWS Cost:** ~$0.75 | **Depends On:** Issue #26
+=======
 **Owner:** Mohar Gorai  
 **Estimated Effort:** 5 hours | **AWS Cost:** ~$1.50  
 **Depends On:** Issue #26 (E2 complete)  
@@ -958,12 +1379,16 @@ Test recovery between bursts. 3 consecutive 10× bursts with 2-minute gaps. Purp
 **Acceptance Criteria:**
 - [ ] 15 `.jtl` files committed to `experiments/results/e5/`
 - [ ] Per-burst reward windows extracted and committed to `experiments/results/e5/burst_windows.csv`
+>>>>>>> origin/main
 
 ---
 
 ### Issue #30 — E6: Noisy/Transient Spikes
 
 **Labels:** `type:experiment` `phase:6-experiments` `priority:high` `costs:aws-billing`  
+<<<<<<< HEAD
+**Owner:** Agrima Gupta | **AWS Cost:** ~$0.25 | **Depends On:** Issue #26
+=======
 **Owner:** Agrima Gupta  
 **Estimated Effort:** 4 hours | **AWS Cost:** ~$0.50  
 **Depends On:** Issue #26 (E2 complete)  
@@ -977,12 +1402,16 @@ Test whether PPO over-reacts to short transient noise. Baseline 100 rps with ran
 **Acceptance Criteria:**
 - [ ] 15 `.jtl` files committed to `experiments/results/e6/`
 - [ ] Scale-out event counts per algorithm per run recorded
+>>>>>>> origin/main
 
 ---
 
 ### Issue #31 — E7: Cold-Start / Scaling Response Time
 
 **Labels:** `type:experiment` `phase:6-experiments` `priority:high` `costs:aws-billing`  
+<<<<<<< HEAD
+**Owner:** All 4 members | **AWS Cost:** ~$0.25 | **Depends On:** Issue #26
+=======
 **Owner:** All 4 members  
 **Estimated Effort:** 4 hours | **AWS Cost:** ~$0.50  
 **Depends On:** Issue #26 (E2 complete)  
@@ -1002,12 +1431,16 @@ Measure time from burst onset to N+1 instances being healthy in the target group
 **Acceptance Criteria:**
 - [ ] 10 timing records committed (5 PPO proactive + 5 Threshold reactive) to `experiments/results/e7/scaling_times.csv`
 - [ ] t₀, t₁, t₂ explicitly recorded for each run with sub-second precision
+>>>>>>> origin/main
 
 ---
 
 ### Issue #32 — E8: Cost/Performance Trade-off
 
 **Labels:** `type:experiment` `phase:6-experiments` `priority:high` `costs:aws-billing`  
+<<<<<<< HEAD
+**Owner:** Devkanti Sarkar | **AWS Cost:** ~$0.50 | **Depends On:** Issue #26
+=======
 **Owner:** Devkanti Sarkar  
 **Estimated Effort:** 8 hours | **AWS Cost:** ~$1.00  
 **Depends On:** Issue #26 (E2 complete — uses E2 traffic profile)  
@@ -1024,12 +1457,16 @@ Vary the utilisation reward weight w₂ to understand cost vs P95 latency trade-
 - [ ] 3 retrained models committed to `models/ppo/` with config-specific names
 - [ ] 9 `.jtl` files committed to `experiments/results/e8/` (3 configs × 3 seeds)
 - [ ] Cost estimates per config recorded in `experiments/results/e8/cost_comparison.csv`
+>>>>>>> origin/main
 
 ---
 
 ### Issue #33 — E9: DRL Algorithm Comparison (PPO vs DQN)
 
 **Labels:** `type:analysis` `phase:6-experiments` `priority:high` `costs:free`  
+<<<<<<< HEAD
+**Owner:** All 4 members | **AWS Cost:** $0 (reuses E2/E3 data) | **Depends On:** Issues #26, #27
+=======
 **Owner:** All 4 members  
 **Estimated Effort:** 2 hours | **AWS Cost:** $0 (uses E2/E3 data)  
 **Depends On:** Issues #26, #27 (E2 and E3 data already collected)  
@@ -1046,12 +1483,16 @@ Extract and compare PPO vs DQN results from E2 and E3 using the same test seeds.
 - [ ] `notebooks/04_ablation_study.ipynb` contains PPO vs DQN statistical comparison cell
 - [ ] Paired t-test result committed (t-statistic, p-value, Cohen's d) even if result is not significant
 - [ ] No post-hoc seed filtering
+>>>>>>> origin/main
 
 ---
 
 ### Issue #34 — E10: Reward Ablation Study
 
 **Labels:** `type:experiment` `phase:6-experiments` `priority:critical-path` `costs:aws-billing`  
+<<<<<<< HEAD
+**Owner:** All 4 members | **AWS Cost:** ~$0.50 | **Depends On:** Issue #26
+=======
 **Owner:** All 4 members  
 **Estimated Effort:** 10 hours | **AWS Cost:** ~$1.00  
 **Depends On:** Issue #26 (E2 complete — uses E2 traffic profile)  
@@ -1070,6 +1511,7 @@ Validate each reward component's contribution. Five variants: (a) full reward de
 - [ ] 5 retrained models committed to `models/ppo/ablation/`
 - [ ] 15 `.jtl` files committed to `experiments/results/e10/` (5 variants × 3 seeds)
 - [ ] Ablation comparison table (P95 latency, SLA violation rate, CPU%) committed to `experiments/analysis/`
+>>>>>>> origin/main
 
 ---
 
@@ -1077,17 +1519,23 @@ Validate each reward component's contribution. Five variants: (a) full reward de
 
 **Milestone:** M7 | **Duration:** 4–5 days | **Local only**
 
+<<<<<<< HEAD
+=======
 **Objective:** Compute all reported statistics with correct methodology, generate paper-quality figures, and run reproducibility verification.
 
 **Deliverables:** Completed `notebooks/03_results_analysis.ipynb` with full stats table, 8 paper-quality PDF figures in `experiments/analysis/figures/`, reproducibility report.
 
 **Exit Criteria:** All ??? cells in the results table filled with actual experimental data. All 8 figures exported as PDF. Reproducibility verification run within ±5%.
 
+>>>>>>> origin/main
 ---
 
 ### Issue #35 — Raw Data Collection and Verification
 
 **Labels:** `type:analysis` `phase:7-results` `priority:critical-path` `costs:free`  
+<<<<<<< HEAD
+**Owner:** Agrima Gupta | **Depends On:** All Phase 6 issues | **Blocks:** Issues #36–#37
+=======
 **Owner:** Agrima Gupta  
 **Estimated Effort:** 3 hours  
 **Depends On:** All Phase 6 issues  
@@ -1105,12 +1553,16 @@ Download all experiment results from S3, verify completeness, and check for data
 - [ ] Completeness matrix committed to `experiments/analysis/data_completeness.csv` (rows=experiments, columns=algorithms/seeds, values=row counts)
 - [ ] Any missing runs documented with reason in `experiments/analysis/missing_data.md`
 - [ ] All raw data committed or S3 links recorded in `experiments/results/README.md`
+>>>>>>> origin/main
 
 ---
 
 ### Issue #36 — Statistical Analysis and Results Table
 
 **Labels:** `type:analysis` `phase:7-results` `priority:critical-path` `costs:free`  
+<<<<<<< HEAD
+**Owner:** Devkanti Sarkar | **Depends On:** Issue #35 | **Blocks:** Issue #41
+=======
 **Owner:** Devkanti Sarkar  
 **Estimated Effort:** 6 hours  
 **Depends On:** Issue #35  
@@ -1141,12 +1593,18 @@ Execute the full statistical analysis pipeline in `notebooks/03_results_analysis
 - [ ] All `???` cells in both results table and ablation table filled with actual data
 - [ ] Statistical analysis notebook cells produce reproducible output when re-run with `Restart & Run All`
 - [ ] No data from test seeds 127–141 used anywhere in training or hyperparameter tuning (confirmed)
+>>>>>>> origin/main
 
 ---
 
 ### Issue #37 — Generate Paper-Quality Figures
 
 **Labels:** `type:analysis` `phase:7-results` `priority:high` `costs:free`  
+<<<<<<< HEAD
+**Owner:** Mohar Gorai | **Depends On:** Issue #35 | **Blocks:** Issue #41
+
+**8 required figures:** (1) System architecture, (2) Traffic profile, (3) Reward convergence, (4) Latency CDF, (5) P95 bar chart, (6) CPU timeline, (7) Scaling reaction time, (8) Ablation study. All PDF vector format.
+=======
 **Owner:** Mohar Gorai  
 **Estimated Effort:** 6 hours  
 **Depends On:** Issue #35  
@@ -1176,12 +1634,16 @@ Generate all 8 required figures using matplotlib 3.8 + seaborn 0.13. All figures
 - [ ] No figure uses PNG/raster format
 - [ ] Figure 3 shows actual training curves (not placeholder data)
 - [ ] Figure 5 contains all three spike levels (E1, E2, E3) for all 6 algorithms
+>>>>>>> origin/main
 
 ---
 
 ### Issue #38 — Reproducibility Verification
 
 **Labels:** `type:reproducibility` `phase:7-results` `priority:critical-path` `gate:required` `costs:free`  
+<<<<<<< HEAD
+**Owner:** Any member who was NOT the primary E2 experimenter | **Depends On:** Issue #36 | **Blocks:** Issue #43
+=======
 **Owner:** Any team member who was NOT the primary experimenter for E2  
 **Estimated Effort:** 3 hours  
 **Depends On:** Issue #36  
@@ -1201,6 +1663,7 @@ Verify that a fresh run with documented seeds produces results within ±5% of re
 - [ ] Both verification runs produce P95 latency within ±5% of original recorded values
 - [ ] `decisions/reproducibility_report.md` committed with machine specs, exact commands run, and comparison table
 - [ ] If deviation > 5%: root cause identified and documented before paper submission
+>>>>>>> origin/main
 
 ---
 
@@ -1208,17 +1671,23 @@ Verify that a fresh run with documented seeds produces results within ±5% of re
 
 **Milestone:** M8 | **Duration:** 7–10 days | **Local only**
 
+<<<<<<< HEAD
+=======
 **Objective:** Write a complete, submission-ready conference paper draft (IEEE 2-column format, 6–8 pages) targeting IEEE Cloud / ICDCS / CCGRID 2026–2027.
 
 **Deliverables:** Complete paper draft with all sections, algorithm pseudocode, related work with 15–20 verified citations, results tables with actual data.
 
 **Exit Criteria:** All paper sections drafted. Results section contains only experimentally validated values (no `???` or hypothetical values). Reproducibility check (Issue #38) passed.
 
+>>>>>>> origin/main
 ---
 
 ### Issue #39 — Paper Outline, Section Assignment & Template Setup
 
 **Labels:** `type:documentation` `phase:8-paper` `component:paper` `priority:critical-path` `costs:free`  
+<<<<<<< HEAD
+**Owner:** All (Devkanti leads) | **Depends On:** Issue #36 | **Blocks:** Issues #40–#43
+=======
 **Owner:** All 4 members (Devkanti leads)  
 **Estimated Effort:** 2 hours  
 **Depends On:** Issue #36 (stats must be ready to write Results section)  
@@ -1245,11 +1714,16 @@ Assign paper sections to team members, set internal deadlines, download IEEE tem
 - [ ] `docs/paper/` directory with IEEEtran template committed
 - [ ] Section assignments documented in `decisions/paper_assignments.md` with internal deadlines
 - [ ] LaTeX compiles to PDF without errors (even with placeholder text)
+>>>>>>> origin/main
 
 ---
 
 ### Issue #40 — Write Algorithm Pseudocode
 
+<<<<<<< HEAD
+**Labels:** `type:documentation` `phase:8-paper` `component:paper` `priority:high` `costs:free`  
+**Owner:** Devkanti Sarkar | **Depends On:** Issue #11
+=======
 **Labels:** `type:documentation` `phase:8-paper` `component:paper` `component:ppo-agent` `priority:high` `costs:free`  
 **Owner:** Devkanti Sarkar  
 **Estimated Effort:** 2 hours  
@@ -1267,12 +1741,16 @@ Write paper-ready pseudocode for Algorithm 1 (PPO Training for FlashBalanceAI) a
 - [ ] Both algorithms typeset in `algorithm2e` format and compile without error
 - [ ] Notation is consistent with the MDP formulation in PRD.md Section 9
 - [ ] No fabricated or placeholder algorithm steps
+>>>>>>> origin/main
 
 ---
 
 ### Issue #41 — Write Results Section and Tables
 
 **Labels:** `type:documentation` `phase:8-paper` `component:paper` `priority:critical-path` `costs:free`  
+<<<<<<< HEAD
+**Owner:** Devkanti Sarkar | **Depends On:** Issues #36, #37 | **Blocks:** Issue #43
+=======
 **Owner:** Devkanti Sarkar (all contribute figures)  
 **Estimated Effort:** 4 hours  
 **Depends On:** Issues #36, #37 (statistical analysis and figures complete)  
@@ -1293,12 +1771,16 @@ Write the Results section (Section 6) of the paper. All tables must be filled wi
 - [ ] Table 1 is complete with all actual experimental values and standard deviations
 - [ ] Table 2 (ablation) is complete with E10 data
 - [ ] All 5 research questions (RQ1–RQ5) are explicitly answered in the text
+>>>>>>> origin/main
 
 ---
 
 ### Issue #42 — Write Related Work Section
 
 **Labels:** `type:research` `phase:8-paper` `component:paper` `priority:high` `costs:free`  
+<<<<<<< HEAD
+**Owner:** Agrima Gupta | **Depends On:** Issue #39 | **Blocks:** Issue #43
+=======
 **Owner:** Agrima Gupta  
 **Estimated Effort:** 5 hours  
 **Depends On:** Issue #39 (section assignment)  
@@ -1329,12 +1811,16 @@ Write Related Work (Section 2) citing all 10 surveyed papers plus 5–8 addition
 - [ ] 15–20 citations, all with complete and verified bibliographic information
 - [ ] Explicit research gap paragraph identifying what no surveyed paper does (per PRD Section 16)
 - [ ] No fabricated citations
+>>>>>>> origin/main
 
 ---
 
 ### Issue #43 — Full Paper Internal Review and Revision Round
 
 **Labels:** `type:documentation` `phase:8-paper` `component:paper` `priority:critical-path` `costs:free`  
+<<<<<<< HEAD
+**Owner:** All 4 members | **Depends On:** Issues #39–#42 | **Blocks:** Issue #45
+=======
 **Owner:** All 4 members  
 **Estimated Effort:** 8 hours (combined across team)  
 **Depends On:** Issues #39–#42 (all sections drafted)  
@@ -1356,11 +1842,15 @@ Internal peer-review round where each team member reviews at least one other mem
 - [ ] Paper compiles to PDF ≤ 8 pages with no LaTeX errors or warnings
 - [ ] At least 2 review passes completed (evidenced by PR review comments)
 - [ ] All review comments marked as resolved or explicitly deferred with justification
+>>>>>>> origin/main
 
 ---
 
 ## Phase 9 — Demo, Reproducibility & Teardown
 
+<<<<<<< HEAD
+**Milestone:** M9 | **Duration:** 2–3 days
+=======
 **Milestone:** M9 | **Duration:** 2–3 days**
 
 **Objective:** Create a live demo (optional), build the monitoring dashboard, tag the v1.0 release, and execute complete AWS teardown to prevent billing runoff.
@@ -1368,12 +1858,18 @@ Internal peer-review round where each team member reviews at least one other mem
 **Deliverables:** v1.0 GitHub release with model artifacts, `scripts/teardown.sh` executed and verified, `decisions/reproducibility_report.md` finalised.
 
 **Exit Criteria:** `v1.0` tag exists on `main`. AWS Cost Explorer confirms all chargeable resources deleted. Teardown script verified.
+>>>>>>> origin/main
 
 ---
 
 ### Issue #44 — Build Live Monitoring Dashboard
 
 **Labels:** `type:implementation` `phase:9-demo` `component:metrics` `priority:normal` `costs:free`  
+<<<<<<< HEAD
+**Owner:** Agrima Gupta | **Depends On:** Issue #23
+
+**Description:** `src/metrics/visualiser.py` — Python Dash app, runs **locally** on experimenter's laptop. Reads `state/current.json` from S3 every 5s. No AWS CloudWatch Dashboard provisioned (not required for research).
+=======
 **Owner:** Agrima Gupta  
 **Estimated Effort:** 4 hours  
 **Depends On:** Issue #23 (CloudWatch metrics must be publishing)  
@@ -1392,12 +1888,18 @@ Create `src/metrics/visualiser.py` as a Python Dash application showing live exp
 - [ ] `python src/metrics/visualiser.py` starts without error at `http://localhost:8050`
 - [ ] All 3 graphs update when S3 state is refreshed
 - [ ] Dashboard works in read-only mode (no writes to AWS)
+>>>>>>> origin/main
 
 ---
 
 ### Issue #45 — Tag v1.0 GitHub Release
 
 **Labels:** `type:documentation` `phase:9-demo` `priority:critical-path` `costs:free`  
+<<<<<<< HEAD
+**Owner:** Devkanti Sarkar | **Depends On:** Issue #43, Issue #38 | **Blocks:** Issue #46
+
+**Release assets:** `ppo_flash_v1.zip`, `dqn_flash_v1.zip`, `environment.yml`, `requirements.txt`, S3 results link. Release notes include: seeds, Python version, SB3 version, reproducibility command, AWS cost actuals.
+=======
 **Owner:** Devkanti Sarkar  
 **Estimated Effort:** 1 hour  
 **Depends On:** Issue #43 (paper review complete), Issue #38 (reproducibility verified)  
@@ -1426,12 +1928,20 @@ Create the `v1.0` annotated Git tag on `main` and publish a GitHub Release with 
 - [ ] GitHub Releases page shows release with all listed assets attached
 - [ ] Release notes contain reproducibility instructions runnable by a third party
 - [ ] All PRD research objectives (O1–O8) are addressed in release notes (even if results are negative)
+>>>>>>> origin/main
 
 ---
 
 ### Issue #46 — Execute AWS Teardown
 
 **Labels:** `type:infrastructure` `phase:9-demo` `component:aws-infra` `priority:critical-path` `gate:required` `costs:free`  
+<<<<<<< HEAD
+**Owner:** Devkanti Sarkar | **Depends On:** Issue #45
+
+**Description:** Execute `scripts/teardown.sh` — delete ALB, target group, ASG (desired=0), Lambda functions, inference EC2, DynamoDB table, S3 bucket (after local backup). Verify $0 ongoing charges in Cost Explorer.
+
+> **Do NOT delete S3 until all experiment results are downloaded locally and committed to the release.**
+=======
 **Owner:** Devkanti Sarkar  
 **Estimated Effort:** 1 hour  
 **Depends On:** Issue #45 (release tagged — all experimental data must be backed up locally AND in release before teardown)  
@@ -1461,20 +1971,35 @@ Execute the complete teardown procedure to delete all chargeable AWS resources a
 - [ ] AWS Console: S3 bucket deleted (or confirmed empty)
 - [ ] AWS Cost Explorer shows no ongoing hourly charges
 - [ ] Teardown completion screenshot committed to `decisions/teardown_confirmation.md`
+>>>>>>> origin/main
 
 ---
 
 ## 13. Critical Path
 
+<<<<<<< HEAD
+```
+Issue #1 (ADR-001 + ADR-002)
+=======
 The critical path represents the minimum-duration sequence of tasks that determine the earliest possible completion date. No task on the critical path can slip without delaying the entire project.
 
 ```
 Issue #1 (ADR-001)
+>>>>>>> origin/main
     ↓
 Issue #2 (Repo scaffold)
     ↓
 Issue #3 (Python environment)
     ↓
+<<<<<<< HEAD
+Issue #8 (Traffic generator) ─────────────────────┐
+    ↓                                               │
+Issue #5 (FlashSaleEnv) ←───────────────────────────┘
+    ↓
+Issue #11 (PPO training)
+    ↓
+Issue #13 (Local eval GATE CHECK)
+=======
 Issue #8 (Traffic generator) ──────────────────────────────────────┐
     ↓                                                               │
 Issue #5 (FlashSaleEnv)                                            │
@@ -1482,11 +2007,27 @@ Issue #5 (FlashSaleEnv)                                            │
 Issue #11 (PPO training) ←─────────────────────────────────────────┘
     ↓
 Issue #13 (Local evaluation GATE CHECK)
+>>>>>>> origin/main
     ↓
 Issue #14 (AWS billing alarm GATE CHECK)
     ↓
 Issues #15 → #16 → #17 → #18 (AWS stack)
     ↓
+<<<<<<< HEAD
+Issues #20 → #21 → #22 → #23 (Lambda + inference server)
+    ↓
+Issue #24 (End-to-end integration GATE CHECK)
+    ↓
+Issue #25 (E1) → Issue #26 (E2) → Issue #27 (E3)
+    ↓
+Issue #35 (Data verification) → Issue #36 (Stats)
+    ↓
+Issues #39 → #41 (Paper outline → Results section)
+    ↓
+Issue #43 (Paper review) → Issue #45 (v1.0 release) → Issue #46 (Teardown)
+```
+
+=======
 Issues #20 → #21 → #22 → #23 (Lambda functions)
     ↓
 Issue #24 (End-to-end integration GATE CHECK)
@@ -1512,10 +2053,20 @@ Issue #46 (AWS Teardown)
 
 **Total calendar time on critical path: ~35 days with 4 students working in parallel**
 
+>>>>>>> origin/main
 ---
 
 ## 14. Parallelisable Work
 
+<<<<<<< HEAD
+| After | Can run in parallel |
+|-------|-------------------|
+| Issue #3 (env) | Issues #4, #6, #7, #10 |
+| Issue #11 started | Issue #12 (DQN, frozen env) |
+| Issue #26 (E2) | Issues #29, #30, #31, #32, #33 |
+| Issue #35 (data) | Issues #36, #37 |
+| Issue #39 (paper outline) | Issues #40, #41, #42 |
+=======
 The following issue groups can be worked simultaneously once their shared dependency is met:
 
 | After | Can run in parallel |
@@ -1528,11 +2079,21 @@ The following issue groups can be worked simultaneously once their shared depend
 | Issue #35 (data verified) | Issues #36, #37 (statistical analysis and figures) |
 | Issue #39 (paper outline) | Issues #40, #41, #42 (pseudocode, results, related work) |
 | Issue #43 (paper review) | Issue #44 (monitoring dashboard) |
+>>>>>>> origin/main
 
 ---
 
 ## 15. Release Checkpoints
 
+<<<<<<< HEAD
+| Tag | Trigger | Gate |
+|-----|---------|------|
+| `v0.1-env-ready` | Issue #13 closes | PPO converges; local eval passes |
+| `v0.2-aws-live` | Issue #24 closes | Integration test all 6 checks pass |
+| `v0.3-experiments-done` | Issue #35 closes | All E1–E10 raw data verified |
+| `v0.4-analysis-done` | Issue #37 closes | Stats table + 8 PDF figures |
+| `v1.0` | Issue #43 closes | Paper reviewed; reproducibility passed; AWS teardown complete |
+=======
 | Tag | Trigger | Contents | Status Gate |
 |-----|---------|----------|-------------|
 | `v0.1-env-ready` | Issue #13 closes (local eval gate passes) | Trained PPO+DQN models, all unit tests passing, preliminary local results table | Issue #13 acceptance criteria met |
@@ -1540,11 +2101,32 @@ The following issue groups can be worked simultaneously once their shared depend
 | `v0.3-experiments-done` | Issue #35 closes (all raw data verified) | All E1–E10 raw data in `experiments/results/`, completeness matrix | Issue #35 acceptance criteria met |
 | `v0.4-analysis-done` | Issue #37 closes (all 8 figures generated) | Complete stats table, all 8 PDF figures, reproducibility report | Issues #36, #37, #38 all closed |
 | `v1.0` | Issue #43 closes (paper review complete) | Final paper draft, model artifacts, environment files, release notes with reproducibility instructions | Issues #38, #43, #45 all closed |
+>>>>>>> origin/main
 
 ---
 
 ## 16. Contribution Tracking
 
+<<<<<<< HEAD
+| Category | Devkanti | Agrima | Mohar | [4th] |
+|----------|---------|--------|-------|-------|
+| Research | PRD lead, ADR-001 | Research gap, related work | H-MAS insight, Alibaba trace | TBD |
+| Development | FlashSaleEnv, PPO, local eval | Repo scaffold, baselines, DQN | Flask backend, JMeter, EC2/ASG/ALB | TBD |
+| Cloud Integration | AWS setup, IAM, inference server, teardown | State collector Lambda, S3/DynamoDB | Scaling Lambda, custom CW metrics, EC2 | TBD |
+| AI/ML | PPO training | DQN training, E9 comparison | E5 repeated bursts | TBD |
+| Testing | Local gate check, env tests | Baseline/metric tests, E1/E6 | Integration test, E7 | TBD |
+| Documentation | ADR-001/002, paper intro/methods | PRD updates, paper setup/results, refs | Paper conclusion, architecture diagram | TBD |
+| GitHub | Release tagging, PR coordination | ≥2 PRs, ≥2 reviews | ≥2 PRs, ≥2 reviews | ≥2 PRs, ≥2 reviews |
+
+**Minimum per BCSE355L guidelines:** ≥ 2 PRs opened · ≥ 2 code reviews · weekly commits · continuous documentation updates
+
+**Branch naming:** `feature/phase{N}-{description}` · `experiment/e{N}-{algo}` · `docs/phase{N}-{doc}`  
+**Commit convention:** `[PHASE-{N}] {verb} {what}`
+
+---
+
+*Document version 1.1 — reflects cost-optimisation review (ADR-002). Core research methodology unchanged.*
+=======
 The guideline requires individual contribution tracking. Every team member must maintain evidence across the following categories in their commit history and PR participation.
 
 | Contribution Category | Devkanti Sarkar | Agrima Gupta | Mohar Gorai | [4th Member] |
@@ -1592,3 +2174,4 @@ Examples:
 ---
 
 *This plan is derived exclusively from `PRD.md` and `IMPLEMENTATION_PLAN_PART1.md` / `IMPLEMENTATION_PLAN_PART2.md`. It does not redesign the technical architecture, duplicate methodology details, or invent work beyond what is specified in those documents. For full MDP formulation, reward function derivation, AWS service justification, and experimental methodology, refer to `PRD.md` Sections 9–14 and `IMPLEMENTATION_PLAN_PART2.md` Phases 6–7.*
+>>>>>>> origin/main
