@@ -64,3 +64,16 @@ cpu_low_threshold: 30           # % CPU — scale-in alarm threshold
 cpu_low_periods: 5
 billing_alarm_warning_usd: 5    # ADR-001 D22 — billing alarm at $5
 billing_alarm_action_usd: 15    # ADR-001 D22 — hard ceiling at $15
+
+# --- Billing Alarm Stack (Issue #14) ---
+# CloudFormation stack: FlashBalanceAI-BillingAlarms
+# Template: infra/cloudformation/billing-alarms.yaml
+# Deploy:   python scripts/deploy_billing_alarms.py deploy --email1 ... --email2 ...
+# Verify:   python scripts/deploy_billing_alarms.py verify
+#
+# Alarm ARNs (auto-populated by deploy_billing_alarms.py after deployment):
+
+# --- Billing Alarm ARNs (auto-populated by deploy_billing_alarms.py — Issue #14) ---
+# billing_alarm_sns_topic_arn: "arn:aws:sns:us-east-1:380301679239:FlashBalanceAI-BillingAlarms"
+# billing_alarm_warning_arn:   "arn:aws:cloudwatch:us-east-1:380301679239:alarm:FlashBalanceAI-Billing-Warning-5USD"
+# billing_alarm_ceiling_arn:   "arn:aws:cloudwatch:us-east-1:380301679239:alarm:FlashBalanceAI-Billing-Ceiling-15USD"
