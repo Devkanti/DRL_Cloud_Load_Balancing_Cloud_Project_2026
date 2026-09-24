@@ -12,7 +12,7 @@
 region: "us-east-1"            # ADR-001 D10 — locked; do not change
 
 # --- S3 ---
-s3_bucket: "flashbalanceai-TODO_ACCOUNT_ID"   # Replace TODO_ACCOUNT_ID with 12-digit AWS account ID
+s3_bucket: "flashbalanceai-380301679239"   # Account-specific bucket name
 s3_model_prefix: "models/"
 s3_state_key: "state/current.json"
 s3_results_prefix: "results/"
