@@ -101,6 +101,8 @@ tmp/
 temp/
 
 # --- Dataset (large binary files -- fetch separately) ---
+dataset/alibaba_cluster_trace/**
+!dataset/alibaba_cluster_trace/.gitkeep
 dataset/alibaba_cluster_trace/*.csv
 dataset/alibaba_cluster_trace/*.gz
 dataset/alibaba_cluster_trace/*.tar
