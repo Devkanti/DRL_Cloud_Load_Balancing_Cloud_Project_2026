@@ -1,0 +1,194 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  FlashBalanceAI — Issue #14: Billing Alarms
+  Creates an SNS topic with up to 4 email subscriptions and two CloudWatch
+  billing alarms ($5 warning, $15 hard ceiling) per ADR-001 D22.
+  MUST be deployed before any other AWS resource.
+
+# ---------------------------------------------------------------------------
+# Parameters
+# ---------------------------------------------------------------------------
+Parameters:
+  ProjectName:
+    Type: String
+    Default: FlashBalanceAI
+    Description: Project name used for resource naming.
+
+  WarningThresholdUSD:
+    Type: Number
+    Default: 5
+    Description: Dollar amount that triggers the warning alarm (ADR-001 D22).
+
+  CeilingThresholdUSD:
+    Type: Number
+    Default: 15
+    Description: Dollar amount that triggers the hard-ceiling alarm (ADR-001 D22).
+
+  Email1:
+    Type: String
+    Description: "Team member 1 email — Devkanti Sarkar"
+    AllowedPattern: "^[\\w.+-]+@[\\w.-]+\\.[a-zA-Z]{2,}$"
+    ConstraintDescription: Must be a valid email address.
+
+  Email2:
+    Type: String
+    Description: "Team member 2 email — Agrima Gupta"
+    AllowedPattern: "^[\\w.+-]+@[\\w.-]+\\.[a-zA-Z]{2,}$"
+    ConstraintDescription: Must be a valid email address.
+
+  Email3:
+    Type: String
+    Default: ""
+    Description: "Team member 3 email — Mohar Gorai (leave blank to skip)"
+
+  Email4:
+    Type: String
+    Default: ""
+    Description: "Team member 4 email — 4th member (leave blank to skip)"
+
+# ---------------------------------------------------------------------------
+# Conditions
+# ---------------------------------------------------------------------------
+Conditions:
+  HasEmail3: !Not [!Equals [!Ref Email3, ""]]
+  HasEmail4: !Not [!Equals [!Ref Email4, ""]]
+
+# ---------------------------------------------------------------------------
+# Resources
+# ---------------------------------------------------------------------------
+Resources:
+
+  # ---- SNS Topic ----
+  BillingAlarmTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub "${ProjectName}-BillingAlarms"
+      DisplayName: !Sub "${ProjectName} Billing Alerts"
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Issue
+          Value: "14"
+        - Key: Phase
+          Value: "4"
+
+  # ---- SNS Subscriptions (one per team member) ----
+  Subscription1:
+    Type: AWS::SNS::Subscription
+    Properties:
+      TopicArn: !Ref BillingAlarmTopic
+      Protocol: email
+      Endpoint: !Ref Email1
+
+  Subscription2:
+    Type: AWS::SNS::Subscription
+    Properties:
+      TopicArn: !Ref BillingAlarmTopic
+      Protocol: email
+      Endpoint: !Ref Email2
+
+  Subscription3:
+    Type: AWS::SNS::Subscription
+    Condition: HasEmail3
+    Properties:
+      TopicArn: !Ref BillingAlarmTopic
+      Protocol: email
+      Endpoint: !Ref Email3
+
+  Subscription4:
+    Type: AWS::SNS::Subscription
+    Condition: HasEmail4
+    Properties:
+      TopicArn: !Ref BillingAlarmTopic
+      Protocol: email
+      Endpoint: !Ref Email4
+
+  # ---- CloudWatch Billing Alarm — $5 Warning ----
+  BillingAlarmWarning:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${ProjectName}-Billing-Warning-${WarningThresholdUSD}USD"
+      AlarmDescription: !Sub >
+        WARNING: Estimated AWS charges have exceeded $${WarningThresholdUSD}.
+        Review resource usage immediately. (ADR-001 D22)
+      Namespace: AWS/Billing
+      MetricName: EstimatedCharges
+      Dimensions:
+        - Name: Currency
+          Value: USD
+      Statistic: Maximum
+      Period: 21600          # 6 hours (minimum granularity for billing metrics)
+      EvaluationPeriods: 1
+      Threshold: !Ref WarningThresholdUSD
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: missing
+      ActionsEnabled: true
+      AlarmActions:
+        - !Ref BillingAlarmTopic
+      OKActions:
+        - !Ref BillingAlarmTopic
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Severity
+          Value: Warning
+
+  # ---- CloudWatch Billing Alarm — $15 Hard Ceiling ----
+  BillingAlarmCeiling:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${ProjectName}-Billing-Ceiling-${CeilingThresholdUSD}USD"
+      AlarmDescription: !Sub >
+        CRITICAL: Estimated AWS charges have exceeded $${CeilingThresholdUSD}
+        hard ceiling! Stop all non-essential resources NOW. (ADR-001 D22)
+      Namespace: AWS/Billing
+      MetricName: EstimatedCharges
+      Dimensions:
+        - Name: Currency
+          Value: USD
+      Statistic: Maximum
+      Period: 21600          # 6 hours
+      EvaluationPeriods: 1
+      Threshold: !Ref CeilingThresholdUSD
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: missing
+      ActionsEnabled: true
+      AlarmActions:
+        - !Ref BillingAlarmTopic
+      OKActions:
+        - !Ref BillingAlarmTopic
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Severity
+          Value: Critical
+
+# ---------------------------------------------------------------------------
+# Outputs
+# ---------------------------------------------------------------------------
+Outputs:
+  SNSTopicARN:
+    Description: ARN of the billing alarm SNS topic
+    Value: !Ref BillingAlarmTopic
+    Export:
+      Name: !Sub "${ProjectName}-BillingAlarmTopicARN"
+
+  WarningAlarmARN:
+    Description: ARN of the $5 warning billing alarm
+    Value: !GetAtt BillingAlarmWarning.Arn
+    Export:
+      Name: !Sub "${ProjectName}-BillingWarningAlarmARN"
+
+  CeilingAlarmARN:
+    Description: ARN of the $15 hard-ceiling billing alarm
+    Value: !GetAtt BillingAlarmCeiling.Arn
+    Export:
+      Name: !Sub "${ProjectName}-BillingCeilingAlarmARN"
+
+  WarningAlarmName:
+    Description: Name of the warning alarm (for CLI verification)
+    Value: !Ref BillingAlarmWarning
+
+  CeilingAlarmName:
+    Description: Name of the ceiling alarm (for CLI verification)
+    Value: !Ref BillingAlarmCeiling
