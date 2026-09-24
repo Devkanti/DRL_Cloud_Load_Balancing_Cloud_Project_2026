@@ -74,6 +74,7 @@ experiments/results/**
 experiments/analysis/**
 !experiments/results/.gitkeep
 !experiments/analysis/.gitkeep
+!experiments/results/local_gate_results.csv
 
 # --- AWS / secrets ---
 # NEVER commit credentials, keys, or account-specific values

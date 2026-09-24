@@ -28,6 +28,7 @@ def main() -> None:
     finally:
         agent.close()
     subprocess.run([sys.executable, str(ROOT / "scripts" / "plot_drl_validation.py")], check=True)
+    subprocess.run([sys.executable, str(ROOT / "scripts" / "run_local_eval_gate.py")], check=True)
     print("DQN training and paired validation curve completed")
 
 
