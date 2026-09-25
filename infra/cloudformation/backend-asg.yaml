@@ -1,0 +1,441 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  FlashBalanceAI - Issue #17: VPC, Security Groups, Launch Template, and
+  Auto Scaling Group for 4 backend EC2 instances (t2.micro).
+  Designed for minimum cost per ADR-002. Stop ASG between experiment sessions.
+
+# ---------------------------------------------------------------------------
+# Parameters
+# ---------------------------------------------------------------------------
+Parameters:
+  ProjectName:
+    Type: String
+    Default: FlashBalanceAI
+
+  InstanceType:
+    Type: String
+    Default: t2.micro
+    AllowedValues: [t2.micro]
+    Description: "ADR-001 D11 - locked to t2.micro"
+
+  ASGMinSize:
+    Type: Number
+    Default: 2
+
+  ASGDesiredCapacity:
+    Type: Number
+    Default: 4
+
+  ASGMaxSize:
+    Type: Number
+    Default: 8
+
+  ASGCooldown:
+    Type: Number
+    Default: 180
+    Description: "Cooldown in seconds between scaling actions"
+
+  EC2InstanceProfileArn:
+    Type: String
+    Description: "ARN of FlashBalanceAI-EC2-Profile (from Issue #15 SSM)"
+
+  S3BucketName:
+    Type: String
+    Description: "S3 bucket name for app code (flashbalanceai-ACCOUNT_ID)"
+
+  KeyPairName:
+    Type: String
+    Default: ""
+    Description: "Optional - EC2 key pair for SSH access. Leave blank to skip."
+
+# ---------------------------------------------------------------------------
+# Conditions
+# ---------------------------------------------------------------------------
+Conditions:
+  HasKeyPair: !Not [!Equals [!Ref KeyPairName, ""]]
+
+# ---------------------------------------------------------------------------
+# Resources
+# ---------------------------------------------------------------------------
+Resources:
+
+  # ========== VPC ==========
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-VPC"
+        - Key: Project
+          Value: !Ref ProjectName
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-IGW"
+        - Key: Project
+          Value: !Ref ProjectName
+
+  IGWAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+
+  # ---- Public Subnets (2 AZs for ALB requirement) ----
+  PublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.1.0/24
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-Public-1"
+        - Key: Project
+          Value: !Ref ProjectName
+
+  PublicSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.2.0/24
+      AvailabilityZone: !Select [1, !GetAZs ""]
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-Public-2"
+        - Key: Project
+          Value: !Ref ProjectName
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-Public-RT"
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: IGWAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  Subnet1RouteAssoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet1
+      RouteTableId: !Ref PublicRouteTable
+
+  Subnet2RouteAssoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet2
+      RouteTableId: !Ref PublicRouteTable
+
+  # ========== Security Groups ==========
+
+  # ALB security group - allows HTTP from anywhere
+  ALBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: "FlashBalanceAI ALB - allow HTTP inbound"
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+          Description: "HTTP from anywhere (JMeter traffic)"
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-ALB-SG"
+        - Key: Project
+          Value: !Ref ProjectName
+
+  # Backend EC2 security group - allows port 5000 from ALB SG only
+  BackendSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: "FlashBalanceAI Backend - port 5000 from ALB only"
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5000
+          ToPort: 5000
+          SourceSecurityGroupId: !Ref ALBSecurityGroup
+          Description: "Flask app from ALB only"
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+          Description: "SSH for debugging (restrict in production)"
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-Backend-SG"
+        - Key: Project
+          Value: !Ref ProjectName
+
+  # ========== Launch Template ==========
+  BackendLaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateName: !Sub "${ProjectName}-Backend-LT"
+      LaunchTemplateData:
+        ImageId: "{{resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-6.1-x86_64}}"
+        InstanceType: !Ref InstanceType
+        IamInstanceProfile:
+          Arn: !Ref EC2InstanceProfileArn
+        SecurityGroupIds:
+          - !Ref BackendSecurityGroup
+        KeyName: !If [HasKeyPair, !Ref KeyPairName, !Ref "AWS::NoValue"]
+        TagSpecifications:
+          - ResourceType: instance
+            Tags:
+              - Key: Name
+                Value: !Sub "${ProjectName}-Backend"
+              - Key: Project
+                Value: !Ref ProjectName
+              - Key: Phase
+                Value: "4"
+              - Key: Issue
+                Value: "17"
+              - Key: Role
+                Value: backend
+          - ResourceType: volume
+            Tags:
+              - Key: Project
+                Value: !Ref ProjectName
+        UserData:
+          Fn::Base64: !Sub |
+            #!/bin/bash
+            set -euxo pipefail
+
+            # Log everything to /var/log/user-data.log
+            exec > >(tee /var/log/user-data.log) 2>&1
+
+            echo "=== FlashBalanceAI Backend Setup ==="
+            echo "Instance ID: $(ec2-metadata -i | cut -d' ' -f2)"
+
+            # Update system
+            dnf update -y -q
+
+            # Install Python 3.11 and pip
+            dnf install -y python3.11 python3.11-pip
+
+            # Create app directory
+            mkdir -p /opt/flashbalanceai
+            cd /opt/flashbalanceai
+
+            # Install Flask
+            python3.11 -m pip install flask --quiet
+
+            # Write the Flask backend app
+            cat > app.py << 'APPEOF'
+            """
+            Flask backend server for FlashBalanceAI EC2 instances.
+            Tracks CPU utilization, active connections, and request queue.
+            """
+            import time
+            import threading
+            import os
+            from flask import Flask, jsonify
+
+            app = Flask(__name__)
+
+            # Configurable settings
+            MAX_CONNECTIONS = int(os.environ.get('MAX_CONNECTIONS', 100))
+            BASE_LATENCY_MS = float(os.environ.get('BASE_LATENCY_MS', 50.0))
+
+            # Use EC2 instance ID if available
+            try:
+                import urllib.request
+                token = urllib.request.urlopen(
+                    urllib.request.Request(
+                        'http://169.254.169.254/latest/api/token',
+                        headers={'X-aws-ec2-metadata-token-ttl-seconds': '21600'},
+                        method='PUT'
+                    ), timeout=2
+                ).read().decode()
+                INSTANCE_ID = urllib.request.urlopen(
+                    urllib.request.Request(
+                        'http://169.254.169.254/latest/meta-data/instance-id',
+                        headers={'X-aws-ec2-metadata-token': token}
+                    ), timeout=2
+                ).read().decode()
+            except Exception:
+                INSTANCE_ID = os.environ.get('INSTANCE_ID', 'unknown')
+
+            # Global state
+            state_lock = threading.Lock()
+            active_connections = 0
+            queue_depth = 0
+            response_time_ema = BASE_LATENCY_MS
+            EMA_ALPHA = 0.1
+
+            connection_semaphore = threading.Semaphore(MAX_CONNECTIONS)
+
+            @app.route('/health', methods=['GET'])
+            def health():
+                return jsonify({
+                    "status": "healthy",
+                    "instance_id": INSTANCE_ID
+                }), 200
+
+            @app.route('/request', methods=['POST'])
+            def handle_request():
+                global queue_depth, active_connections, response_time_ema
+
+                with state_lock:
+                    queue_depth += 1
+
+                acquired = connection_semaphore.acquire(timeout=10.0)
+
+                with state_lock:
+                    queue_depth -= 1
+
+                if not acquired:
+                    return jsonify({"error": "Service Unavailable", "status": 503}), 503
+
+                try:
+                    with state_lock:
+                        active_connections += 1
+                        cpu_util = active_connections / MAX_CONNECTIONS
+
+                    latency_ms = BASE_LATENCY_MS * (1.0 + cpu_util)
+                    time.sleep(latency_ms / 1000.0)
+
+                    with state_lock:
+                        response_time_ema = (EMA_ALPHA * latency_ms) + ((1 - EMA_ALPHA) * response_time_ema)
+
+                    return jsonify({"latency_ms": latency_ms, "status": 200}), 200
+                finally:
+                    with state_lock:
+                        active_connections -= 1
+                    connection_semaphore.release()
+
+            @app.route('/metrics', methods=['GET'])
+            def metrics():
+                with state_lock:
+                    cpu_util = active_connections / MAX_CONNECTIONS
+                    return jsonify({
+                        "cpu_util": cpu_util,
+                        "active_connections": active_connections,
+                        "queue_depth": queue_depth,
+                        "response_time_ema": response_time_ema,
+                        "instance_id": INSTANCE_ID
+                    }), 200
+
+            if __name__ == '__main__':
+                app.run(host='0.0.0.0', port=5000, threaded=True)
+            APPEOF
+
+            # Create systemd service for auto-start
+            cat > /etc/systemd/system/flashbalanceai.service << 'SVCEOF'
+            [Unit]
+            Description=FlashBalanceAI Backend Server
+            After=network.target
+
+            [Service]
+            Type=simple
+            User=root
+            WorkingDirectory=/opt/flashbalanceai
+            ExecStart=/usr/bin/python3.11 app.py
+            Restart=always
+            RestartSec=5
+            Environment=MAX_CONNECTIONS=100
+            Environment=BASE_LATENCY_MS=50.0
+
+            [Install]
+            WantedBy=multi-user.target
+            SVCEOF
+
+            # Enable and start the service
+            systemctl daemon-reload
+            systemctl enable flashbalanceai.service
+            systemctl start flashbalanceai.service
+
+            echo "=== FlashBalanceAI Backend Setup Complete ==="
+
+  # ========== Auto Scaling Group ==========
+  BackendASG:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      AutoScalingGroupName: !Sub "${ProjectName}-ASG"
+      LaunchTemplate:
+        LaunchTemplateId: !Ref BackendLaunchTemplate
+        Version: !GetAtt BackendLaunchTemplate.LatestVersionNumber
+      MinSize: !Ref ASGMinSize
+      DesiredCapacity: !Ref ASGDesiredCapacity
+      MaxSize: !Ref ASGMaxSize
+      Cooldown: !Ref ASGCooldown
+      VPCZoneIdentifier:
+        - !Ref PublicSubnet1
+        - !Ref PublicSubnet2
+      HealthCheckType: EC2
+      HealthCheckGracePeriod: 300
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-Backend"
+          PropagateAtLaunch: true
+        - Key: Project
+          Value: !Ref ProjectName
+          PropagateAtLaunch: true
+        - Key: Phase
+          Value: "4"
+          PropagateAtLaunch: true
+
+# ---------------------------------------------------------------------------
+# Outputs
+# ---------------------------------------------------------------------------
+Outputs:
+  VPCID:
+    Description: VPC ID
+    Value: !Ref VPC
+    Export:
+      Name: !Sub "${ProjectName}-VPCID"
+
+  PublicSubnet1ID:
+    Description: Public Subnet 1 ID
+    Value: !Ref PublicSubnet1
+    Export:
+      Name: !Sub "${ProjectName}-PublicSubnet1"
+
+  PublicSubnet2ID:
+    Description: Public Subnet 2 ID
+    Value: !Ref PublicSubnet2
+    Export:
+      Name: !Sub "${ProjectName}-PublicSubnet2"
+
+  ALBSecurityGroupID:
+    Description: Security Group ID for ALB
+    Value: !Ref ALBSecurityGroup
+    Export:
+      Name: !Sub "${ProjectName}-ALBSecurityGroup"
+
+  BackendSecurityGroupID:
+    Description: Security Group ID for backend instances
+    Value: !Ref BackendSecurityGroup
+    Export:
+      Name: !Sub "${ProjectName}-BackendSecurityGroup"
+
+  LaunchTemplateID:
+    Description: Launch Template ID
+    Value: !Ref BackendLaunchTemplate
+    Export:
+      Name: !Sub "${ProjectName}-LaunchTemplateID"
+
+  ASGName:
+    Description: Auto Scaling Group name
+    Value: !Ref BackendASG
+    Export:
+      Name: !Sub "${ProjectName}-ASGName"
