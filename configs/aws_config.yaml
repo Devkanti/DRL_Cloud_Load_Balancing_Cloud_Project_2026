@@ -26,10 +26,16 @@ asg_desired: 4
 asg_max: 8
 asg_cooldown_seconds: 180
 
-# --- ALB (populated at deploy time; delete between experiment sessions) ---
-# alb_arn: "TODO — populated by deploy.py"
-# alb_dns: "TODO — populated by deploy.py"
-# target_group_arn: "TODO — populated by deploy.py"
+# --- ALB (Issue #18 -- delete between experiment sessions per ADR-002) ---
+# ALB is created/deleted dynamically via: python src/aws/deploy.py create-alb / delete-alb
+# ALB DNS and TG ARN are stored in SSM Parameter Store (not hardcoded):
+#   /flashbalanceai/alb/alb-arn
+#   /flashbalanceai/alb/alb-dns
+#   /flashbalanceai/alb/target-group-arn
+# Last known ALB DNS: FlashBalanceAI-ALB-354356508.us-east-1.elb.amazonaws.com
+# Last known TG ARN: arn:aws:elasticloadbalancing:us-east-1:380301679239:targetgroup/FlashBalanceAI-TG/c2f809faf894e4d6
+alb_name: "FlashBalanceAI-ALB"
+target_group_name: "FlashBalanceAI-TG"
 
 # --- EC2 Inference Server ---
 # inference_server_ip: "TODO — populated at launch"
