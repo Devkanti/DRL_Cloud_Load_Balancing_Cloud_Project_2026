@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-FlashBalanceAI - Issue #17: EC2 ASG Deployment Script
-=====================================================
+FlashBalanceAI - Issue #17/#18: EC2 ASG & ALB Deployment Script
+===============================================================
 
-Manages the backend Auto Scaling Group via CloudFormation.
-Supports: deploy, status, stop (ASG -> 0), start (ASG -> 4), delete, health-check.
+Manages the backend Auto Scaling Group (CloudFormation) and
+Application Load Balancer (boto3 -- separate lifecycle per ADR-002).
 
-Usage:
+ASG commands:
     python src/aws/deploy.py deploy              # Deploy VPC + ASG stack
     python src/aws/deploy.py deploy --key-pair my-key  # Deploy with SSH key
     python src/aws/deploy.py status              # Show ASG instance status
@@ -15,13 +15,23 @@ Usage:
     python src/aws/deploy.py health-check        # Curl /health on all instances
     python src/aws/deploy.py delete              # Delete entire stack
 
+ALB commands (Issue #18 -- separate lifecycle, delete between sessions):
+    python src/aws/deploy.py create-alb          # Create ALB + target group
+    python src/aws/deploy.py alb-status          # Show ALB + target health
+    python src/aws/deploy.py delete-alb          # DELETE ALB (required after each session!)
+
+Full teardown:
+    python src/aws/deploy.py teardown            # delete-alb + stop ASG
+
 Prerequisites:
     - Issue #14 billing alarms deployed
     - Issue #15 IAM roles created (SSM params available)
+    - Issue #16 S3 bucket created
+    - Issue #17 ASG deployed (for ALB commands)
     - pip install boto3 pyyaml requests
 
 References:
-    - ADR-001 D11 (instance config), ADR-002 (cost discipline)
+    - ADR-001 D11 (instance config), ADR-002 (cost discipline, ALB delete-per-session)
     - configs/aws_config.yaml (ASG parameters)
 """
 
@@ -77,6 +87,10 @@ def _ssm_client():
     return boto3.client("ssm", region_name=REGION)
 
 
+def _elbv2_client():
+    return boto3.client("elbv2", region_name=REGION)
+
+
 def _get_ssm_param(ssm, name: str) -> str:
     """Get a value from SSM Parameter Store."""
     try:
@@ -85,6 +99,37 @@ def _get_ssm_param(ssm, name: str) -> str:
         print(f"[FAIL] Cannot read SSM param '{name}': {e}")
         print("       Run 'python src/aws/iam_setup.py create' first (Issue #15).")
         sys.exit(1)
+
+
+def _get_ssm_param_optional(ssm, name: str) -> str | None:
+    """Get SSM param, return None if not found (non-fatal)."""
+    try:
+        return ssm.get_parameter(Name=name)["Parameter"]["Value"]
+    except Exception:
+        return None
+
+
+def _store_ssm_param(ssm, name: str, value: str, description: str = ""):
+    """Store a value in SSM Parameter Store (creates or overwrites)."""
+    try:
+        ssm.put_parameter(
+            Name=name,
+            Value=value,
+            Description=description,
+            Type="String",
+            Tags=[
+                {"Key": "Project", "Value": "FlashBalanceAI"},
+                {"Key": "Issue", "Value": "18"},
+            ],
+        )
+    except ssm.exceptions.ParameterAlreadyExists:
+        ssm.put_parameter(
+            Name=name,
+            Value=value,
+            Description=description,
+            Type="String",
+            Overwrite=True,
+        )
 
 
 def _wait_for_stack(cfn, stack_name: str, target_statuses: list, timeout: int = 600):
@@ -470,6 +515,352 @@ def cmd_delete(args):
     print("\n[DONE] Stack deleted. All instances terminated.")
 
 
+# ---------------------------------------------------------------------------
+# ALB Commands (Issue #18 -- separate lifecycle, boto3-managed)
+# ---------------------------------------------------------------------------
+
+ALB_NAME = "FlashBalanceAI-ALB"
+TG_NAME = "FlashBalanceAI-TG"
+
+
+def create_alb(vpc_id: str, subnet_ids: list, alb_sg_id: str,
+               asg_name: str) -> tuple[str, str, str]:
+    """
+    Create ALB + target group + register ASG instances.
+    Returns (alb_arn, alb_dns, tg_arn).
+    Callable from other modules (e.g. teardown scripts).
+    """
+    elbv2 = _elbv2_client()
+    ec2 = _ec2_client()
+    asg = _asg_client()
+
+    # ---- 1. Create Target Group ----
+    print("[1/4] Creating target group ...")
+    tg_resp = elbv2.create_target_group(
+        Name=TG_NAME,
+        Protocol="HTTP",
+        Port=5000,
+        VpcId=vpc_id,
+        HealthCheckProtocol="HTTP",
+        HealthCheckPort="5000",
+        HealthCheckPath="/health",
+        HealthCheckIntervalSeconds=30,
+        HealthCheckTimeoutSeconds=5,
+        HealthyThresholdCount=2,
+        UnhealthyThresholdCount=3,
+        Matcher={"HttpCode": "200"},
+        TargetType="instance",
+        Tags=[
+            {"Key": "Project", "Value": "FlashBalanceAI"},
+            {"Key": "Issue", "Value": "18"},
+            {"Key": "Phase", "Value": "4"},
+        ],
+    )
+    tg_arn = tg_resp["TargetGroups"][0]["TargetGroupArn"]
+    print(f"  [OK] Target group: {TG_NAME}")
+    print(f"       ARN: {tg_arn}")
+
+    # ---- 2. Register ASG instances in target group ----
+    print("\n[2/4] Registering instances ...")
+    instances = _get_asg_instances(asg, asg_name)
+    in_service = [i for i in instances if i.get("LifecycleState") == "InService"]
+
+    if not in_service:
+        print("  [WARN] No InService instances found. Register later with alb-status.")
+    else:
+        targets = [{"Id": i["InstanceId"], "Port": 5000} for i in in_service]
+        elbv2.register_targets(TargetGroupArn=tg_arn, Targets=targets)
+        for t in targets:
+            print(f"  [OK] Registered: {t['Id']}:5000")
+
+    # ---- 3. Create ALB ----
+    print("\n[3/4] Creating Application Load Balancer ...")
+    alb_resp = elbv2.create_load_balancer(
+        Name=ALB_NAME,
+        Subnets=subnet_ids,
+        SecurityGroups=[alb_sg_id],
+        Scheme="internet-facing",
+        Type="application",
+        IpAddressType="ipv4",
+        Tags=[
+            {"Key": "Project", "Value": "FlashBalanceAI"},
+            {"Key": "Issue", "Value": "18"},
+            {"Key": "Phase", "Value": "4"},
+        ],
+    )
+    alb = alb_resp["LoadBalancers"][0]
+    alb_arn = alb["LoadBalancerArn"]
+    alb_dns = alb["DNSName"]
+    print(f"  [OK] ALB created: {ALB_NAME}")
+    print(f"       DNS: {alb_dns}")
+    print(f"       ARN: {alb_arn}")
+
+    # Wait for ALB to become active
+    print("  Waiting for ALB to become active ...", end="", flush=True)
+    waiter = elbv2.get_waiter("load_balancer_available")
+    try:
+        waiter.wait(
+            LoadBalancerArns=[alb_arn],
+            WaiterConfig={"Delay": 15, "MaxAttempts": 20},
+        )
+        print(" active.")
+    except Exception as e:
+        print(f"\n  [WARN] Waiter error: {e}")
+        print("  ALB may still be provisioning. Check with 'alb-status'.")
+
+    # ---- 4. Create HTTP listener ----
+    print("\n[4/4] Creating HTTP listener (port 80 -> target group) ...")
+    elbv2.create_listener(
+        LoadBalancerArn=alb_arn,
+        Protocol="HTTP",
+        Port=80,
+        DefaultActions=[
+            {
+                "Type": "forward",
+                "TargetGroupArn": tg_arn,
+            }
+        ],
+    )
+    print("  [OK] Listener: HTTP:80 -> target group:5000")
+
+    return alb_arn, alb_dns, tg_arn
+
+
+def delete_alb() -> bool:
+    """
+    Delete ALB, listener, and target group.
+    Callable from other modules (e.g. teardown scripts, Issue #46).
+    Returns True if deleted, False if nothing to delete.
+    """
+    elbv2 = _elbv2_client()
+    ssm = _ssm_client()
+
+    # Find ALB by name
+    alb_arn = None
+    try:
+        resp = elbv2.describe_load_balancers(Names=[ALB_NAME])
+        if resp["LoadBalancers"]:
+            alb_arn = resp["LoadBalancers"][0]["LoadBalancerArn"]
+    except ClientError as e:
+        if "LoadBalancerNotFound" in str(e):
+            pass
+        else:
+            raise
+
+    if not alb_arn:
+        print(f"[SKIP] ALB '{ALB_NAME}' not found -- already deleted?")
+        return False
+
+    # Delete listeners first
+    print(f"Deleting ALB '{ALB_NAME}' ...")
+    listeners = elbv2.describe_listeners(LoadBalancerArn=alb_arn)
+    for listener in listeners.get("Listeners", []):
+        elbv2.delete_listener(ListenerArn=listener["ListenerArn"])
+        print(f"  [OK] Deleted listener: {listener['Protocol']}:{listener['Port']}")
+
+    # Delete ALB
+    elbv2.delete_load_balancer(LoadBalancerArn=alb_arn)
+    print(f"  [OK] ALB deletion initiated: {ALB_NAME}")
+
+    # Wait for ALB to be fully deleted
+    print("  Waiting for ALB to be fully deleted ...", end="", flush=True)
+    for _ in range(40):
+        try:
+            resp = elbv2.describe_load_balancers(Names=[ALB_NAME])
+            if not resp["LoadBalancers"]:
+                break
+            state = resp["LoadBalancers"][0].get("State", {}).get("Code", "")
+            if state == "active":
+                # Still deleting
+                pass
+        except ClientError as e:
+            if "LoadBalancerNotFound" in str(e):
+                break
+            raise
+        print(".", end="", flush=True)
+        time.sleep(10)
+    print(" done.")
+
+    # Delete target group (must wait until ALB is gone)
+    try:
+        tg_resp = elbv2.describe_target_groups(Names=[TG_NAME])
+        if tg_resp["TargetGroups"]:
+            tg_arn = tg_resp["TargetGroups"][0]["TargetGroupArn"]
+            elbv2.delete_target_group(TargetGroupArn=tg_arn)
+            print(f"  [OK] Deleted target group: {TG_NAME}")
+    except ClientError as e:
+        if "TargetGroupNotFound" in str(e):
+            pass
+        else:
+            raise
+
+    # Clean SSM params
+    for param in [
+        f"{SSM_PREFIX}/alb/alb-arn",
+        f"{SSM_PREFIX}/alb/alb-dns",
+        f"{SSM_PREFIX}/alb/target-group-arn",
+    ]:
+        try:
+            ssm.delete_parameter(Name=param)
+        except ssm.exceptions.ParameterNotFound:
+            pass
+
+    print(f"\n[DONE] ALB deleted. No more ALB charges accumulating.")
+    return True
+
+
+def cmd_create_alb(args):
+    """Create ALB + target group + listener (Issue #18)."""
+    ssm = _ssm_client()
+    cfg = _load_config()
+
+    # Read VPC/subnet/SG from SSM (stored by Issue #17 deploy)
+    vpc_id = _get_ssm_param_optional(ssm, f"{SSM_PREFIX}/vpc/vpc-id")
+    subnet1 = _get_ssm_param_optional(ssm, f"{SSM_PREFIX}/vpc/public-subnet-1")
+    subnet2 = _get_ssm_param_optional(ssm, f"{SSM_PREFIX}/vpc/public-subnet-2")
+    alb_sg = _get_ssm_param_optional(ssm, f"{SSM_PREFIX}/vpc/alb-sg-id")
+
+    if not all([vpc_id, subnet1, subnet2, alb_sg]):
+        print("[FAIL] VPC/subnet/SG SSM parameters not found.")
+        print("       Deploy the ASG stack first: python src/aws/deploy.py deploy")
+        sys.exit(1)
+
+    # Check if ALB already exists
+    elbv2 = _elbv2_client()
+    try:
+        resp = elbv2.describe_load_balancers(Names=[ALB_NAME])
+        if resp["LoadBalancers"]:
+            alb = resp["LoadBalancers"][0]
+            print(f"[SKIP] ALB already exists:")
+            print(f"  DNS: {alb['DNSName']}")
+            print(f"  State: {alb['State']['Code']}")
+            print("  Run 'delete-alb' first if you want to recreate it.")
+            return
+    except ClientError as e:
+        if "LoadBalancerNotFound" not in str(e):
+            raise
+
+    asg_name = cfg["asg_name"]
+
+    print("Issue #18: ALB Setup (Flash-Session Only)")
+    print(f"  VPC       : {vpc_id}")
+    print(f"  Subnets   : {subnet1}, {subnet2}")
+    print(f"  ALB SG    : {alb_sg}")
+    print(f"  ASG       : {asg_name}")
+    print()
+
+    alb_arn, alb_dns, tg_arn = create_alb(
+        vpc_id=vpc_id,
+        subnet_ids=[subnet1, subnet2],
+        alb_sg_id=alb_sg,
+        asg_name=asg_name,
+    )
+
+    # Store in SSM
+    print("\n[SSM] Storing ALB info ...")
+    _store_ssm_param(ssm, f"{SSM_PREFIX}/alb/alb-arn", alb_arn, "FlashBalanceAI ALB ARN")
+    print(f"  [OK] /flashbalanceai/alb/alb-arn")
+    _store_ssm_param(ssm, f"{SSM_PREFIX}/alb/alb-dns", alb_dns, "FlashBalanceAI ALB DNS")
+    print(f"  [OK] /flashbalanceai/alb/alb-dns = {alb_dns}")
+    _store_ssm_param(ssm, f"{SSM_PREFIX}/alb/target-group-arn", tg_arn, "FlashBalanceAI target group ARN")
+    print(f"  [OK] /flashbalanceai/alb/target-group-arn")
+
+    print(f"\n[DONE] ALB is live!")
+    print(f"  Test: curl http://{alb_dns}/health")
+    print(f"\n[IMPORTANT] Delete ALB after each session to avoid charges:")
+    print(f"  python src/aws/deploy.py delete-alb")
+
+
+def cmd_alb_status(args):
+    """Show ALB status and target health."""
+    elbv2 = _elbv2_client()
+
+    # Find ALB
+    try:
+        resp = elbv2.describe_load_balancers(Names=[ALB_NAME])
+        if not resp["LoadBalancers"]:
+            print(f"[FAIL] ALB '{ALB_NAME}' not found.")
+            return
+    except ClientError as e:
+        if "LoadBalancerNotFound" in str(e):
+            print(f"ALB '{ALB_NAME}' does not exist. Nothing running (no ALB charges).")
+            return
+        raise
+
+    alb = resp["LoadBalancers"][0]
+    print(f"ALB: {ALB_NAME}")
+    print(f"  DNS   : {alb['DNSName']}")
+    print(f"  State : {alb['State']['Code']}")
+    print(f"  Scheme: {alb['Scheme']}")
+    print(f"  ARN   : {alb['LoadBalancerArn']}")
+
+    # Find target group
+    try:
+        tg_resp = elbv2.describe_target_groups(Names=[TG_NAME])
+        if tg_resp["TargetGroups"]:
+            tg = tg_resp["TargetGroups"][0]
+            tg_arn = tg["TargetGroupArn"]
+            print(f"\nTarget Group: {TG_NAME}")
+            print(f"  Port     : {tg['Port']}")
+            print(f"  Protocol : {tg['Protocol']}")
+            print(f"  Health   : {tg['HealthCheckPath']} (interval: {tg['HealthCheckIntervalSeconds']}s)")
+
+            # Target health
+            health = elbv2.describe_target_health(TargetGroupArn=tg_arn)
+            targets = health.get("TargetHealthDescriptions", [])
+            if targets:
+                print(f"\n  Targets ({len(targets)}):")
+                all_healthy = True
+                for t in targets:
+                    tid = t["Target"]["Id"]
+                    port = t["Target"]["Port"]
+                    state = t["TargetHealth"]["State"]
+                    reason = t["TargetHealth"].get("Reason", "")
+                    desc = t["TargetHealth"].get("Description", "")
+                    status_str = f"[OK]" if state == "healthy" else f"[{state.upper()}]"
+                    extra = f" ({reason}: {desc})" if reason else ""
+                    print(f"    {tid}:{port} {status_str}{extra}")
+                    if state != "healthy":
+                        all_healthy = False
+
+                print()
+                if all_healthy:
+                    print("[PASS] All targets healthy.")
+                else:
+                    print("[WARN] Some targets not healthy. They may still be initializing.")
+            else:
+                print("\n  No targets registered.")
+    except ClientError as e:
+        if "TargetGroupNotFound" in str(e):
+            print(f"\n[WARN] Target group '{TG_NAME}' not found.")
+        else:
+            raise
+
+
+def cmd_delete_alb(args):
+    """Delete ALB -- REQUIRED after each experiment session (ADR-002)."""
+    delete_alb()
+
+
+def cmd_teardown(args):
+    """Full teardown: delete ALB + stop all ASG instances."""
+    print("=" * 60)
+    print("FlashBalanceAI Full Teardown")
+    print("=" * 60)
+
+    # 1. Delete ALB (most expensive -- do first)
+    print("\n--- Step 1: Delete ALB ---")
+    delete_alb()
+
+    # 2. Stop ASG instances
+    print("\n--- Step 2: Stop ASG instances ---")
+    stop_all_instances()
+
+    print("\n" + "=" * 60)
+    print("[DONE] Teardown complete. No more charges accumulating.")
+    print("=" * 60)
+
+
 def stop_all_instances():
     """
     Convenience function for teardown scripts (Issue #46).
@@ -510,31 +901,32 @@ def stop_all_instances():
 
 def main():
     parser = argparse.ArgumentParser(
-        description="FlashBalanceAI Issue #17 -- EC2 ASG Deployment",
+        description="FlashBalanceAI Issue #17/#18 -- EC2 ASG & ALB Deployment",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
-    # deploy
+    # --- ASG commands (Issue #17) ---
     p_deploy = sub.add_parser("deploy", help="Deploy VPC + ASG CloudFormation stack")
     p_deploy.add_argument("--key-pair", default="", help="EC2 key pair name for SSH access")
 
-    # status
     sub.add_parser("status", help="Show ASG instance status")
-
-    # stop
     sub.add_parser("stop", help="Set ASG to 0 instances (cost saving)")
 
-    # start
     p_start = sub.add_parser("start", help="Restore ASG to desired capacity")
     p_start.add_argument("--desired", type=int, default=0,
                          help="Override desired capacity (default: from config)")
 
-    # health-check
     sub.add_parser("health-check", help="Check /health on all running instances")
-
-    # delete
     sub.add_parser("delete", help="Delete entire stack (VPC, ASG, instances)")
+
+    # --- ALB commands (Issue #18) ---
+    sub.add_parser("create-alb", help="Create ALB + target group + listener")
+    sub.add_parser("alb-status", help="Show ALB and target health status")
+    sub.add_parser("delete-alb", help="DELETE ALB (required after each session!)")
+
+    # --- Full teardown ---
+    sub.add_parser("teardown", help="Full teardown: delete ALB + stop ASG")
 
     args = parser.parse_args()
 
@@ -545,6 +937,10 @@ def main():
         "start": cmd_start,
         "health-check": cmd_health_check,
         "delete": cmd_delete,
+        "create-alb": cmd_create_alb,
+        "alb-status": cmd_alb_status,
+        "delete-alb": cmd_delete_alb,
+        "teardown": cmd_teardown,
     }
     commands[args.command](args)
 

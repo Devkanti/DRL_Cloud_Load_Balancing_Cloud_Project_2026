@@ -14,9 +14,9 @@ Parameters:
 
   InstanceType:
     Type: String
-    Default: t2.micro
-    AllowedValues: [t2.micro]
-    Description: "ADR-001 D11 - locked to t2.micro"
+    Default: t3.micro
+    AllowedValues: [t2.micro, t3.micro]
+    Description: "t3.micro is Free Tier eligible on new accounts"
 
   ASGMinSize:
     Type: Number

@@ -19,7 +19,7 @@ s3_results_prefix: "results/"
 
 # --- EC2 / ASG ---
 asg_name: "FlashBalanceAI-ASG"
-instance_type: "t2.micro"      # ADR-001 D11 — locked
+instance_type: "t3.micro"      # Free Tier eligible (t2.micro NOT free on new accounts)
 n_backend_instances: 4         # ADR-001 D4/D11 — locked (N=4)
 asg_min: 2
 asg_desired: 4
