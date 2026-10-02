@@ -47,7 +47,7 @@ lambda_state_collector_name: "FlashBalanceAI-StateCollector"
 lambda_inference_coordinator_name: "FlashBalanceAI-InferenceCoordinator"
 lambda_scaling_trigger_name: "FlashBalanceAI-ScalingTrigger"
 lambda_memory_mb: 128
-lambda_timeout_seconds: 15
+lambda_timeout_seconds: 30
 lambda_runtime: "python3.11"
 
 # --- DynamoDB ---
