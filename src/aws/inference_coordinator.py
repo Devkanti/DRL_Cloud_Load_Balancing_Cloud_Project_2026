@@ -87,6 +87,17 @@ def lambda_handler(event, context):
     }
     table.put_item(Item=item)
     
+    # 4. Trigger ScalingTrigger asynchronously
+    try:
+        lam = boto3.client("lambda", region_name=REGION)
+        lam.invoke(
+            FunctionName="FlashBalanceAI-ScalingTrigger",
+            InvocationType="Event",
+            Payload=json.dumps({"action": action})
+        )
+    except Exception as e:
+        print(f"Failed to trigger ScalingTrigger: {e}")
+    
     return {
         "statusCode": 200,
         "body": json.dumps(item)
