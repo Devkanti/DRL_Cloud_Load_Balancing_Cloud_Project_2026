@@ -58,12 +58,18 @@ def _select_action(policy: Any, observation: np.ndarray) -> int:
     return int(policy.select_backend(observation))
 
 
-def simulate_episode(policy: Any, profile: np.ndarray) -> dict[str, float]:
-    """Simulate one 100 ms episode using an aggregate four-backend queue model.
+def simulate_episode(
+    policy: Any,
+    profile: np.ndarray,
+    max_queue_depth: float = 250.0,
+    timeout_ms: float = 3000.0,
+) -> dict[str, float]:
+    """Simulate one 100 ms episode using an aggregate concurrent four-backend queue model.
 
-    The model has 100 request slots per backend per 100 ms interval, matching
-    FlashSaleEnv's backend connection limit. It computes one latency per time
-    bin and uses that bin's request count as the P95 weight.
+    The model has 100 request slots per backend per 100 ms interval (1,000 req/s per backend),
+    matching FlashSaleEnv's backend connection limit. All 4 backends drain concurrently
+    in parallel every time step. Queues are bounded by max_queue_depth; requests exceeding
+    the buffer timeout/drop (HTTP 504), preventing unphysical infinite queue accumulation.
     """
     state = _State(np.zeros(4), np.zeros(4), np.full(4, 50.0))
     latencies: list[float] = []
@@ -71,7 +77,7 @@ def simulate_episode(policy: Any, profile: np.ndarray) -> dict[str, float]:
     total_processed = total_arrivals = total_violations = 0
     rewards: list[float] = []
     since_spike = 0.0
-    capacity = 100
+    capacity = 100.0
 
     for arrival_rate in profile:
         arrivals = max(1, int(round(float(arrival_rate) * 0.1)))
@@ -80,28 +86,47 @@ def simulate_episode(policy: Any, profile: np.ndarray) -> dict[str, float]:
         if action not in range(4):
             raise ValueError(f"Policy returned invalid backend index: {action}")
 
+        # Queue arrival batch on chosen backend
         queued_before = state.queues[action]
-        offered = queued_before + arrivals
-        processed = min(offered, capacity)
-        state.queues[action] = offered - processed
-        state.active *= 0.0
-        state.active[action] = min(offered, capacity)
-        cpu = state.active[action] / capacity
-        latency = 50.0 * (1.0 + cpu) + queued_before / capacity * 100.0
-        state.ema_latency[action] = 0.1 * latency + 0.9 * state.ema_latency[action]
+        state.queues[action] += arrivals
+
+        # All 4 backends process queues concurrently in parallel
+        step_processed = 0
+        step_dropped = 0
+        for i in range(4):
+            offered = state.queues[i]
+            proc = min(offered, capacity)
+            state.active[i] = proc
+            rem = offered - proc
+            if rem > max_queue_depth:
+                step_dropped += int(rem - max_queue_depth)
+                rem = max_queue_depth
+            state.queues[i] = rem
+            step_processed += int(proc)
+
+            cpu_i = state.active[i] / capacity
+            q_delay_i = (state.queues[i] / capacity) * 100.0
+            inst_lat = min(timeout_ms, 50.0 * (1.0 + cpu_i) + q_delay_i)
+            state.ema_latency[i] = 0.1 * inst_lat + 0.9 * state.ema_latency[i]
+
+        cpu_action = state.active[action] / capacity
+        q_delay_action = (queued_before / capacity) * 100.0
+        latency = min(timeout_ms, 50.0 * (1.0 + cpu_action) + q_delay_action)
 
         latencies.append(latency)
         latency_weights.append(arrivals)
-        total_processed += int(processed)
+        total_processed += step_processed
         total_arrivals += arrivals
-        if latency > 200.0:
-            total_violations += arrivals
+        
+        step_violations = arrivals if latency > 200.0 else 0
+        step_violations += step_dropped
+        total_violations += min(arrivals, step_violations)
 
         average_latency = float(np.mean(state.ema_latency))
         r_lat = max(0.0, 1.0 - average_latency / 200.0)
         r_util = float(np.mean(state.active / capacity))
-        r_tput = min(1.0, processed / capacity)
-        r_sla = 1.0 - (arrivals if latency > 200.0 else 0.0) / arrivals
+        r_tput = min(1.0, step_processed / (4.0 * capacity))
+        r_sla = 1.0 - (total_violations / total_arrivals if total_arrivals > 0 else 0.0)
         rewards.append(0.4 * r_lat + 0.2 * r_util + 0.2 * r_tput + 0.2 * r_sla)
         since_spike = 0.0 if arrival_rate > 100.0 else since_spike + 0.1
 

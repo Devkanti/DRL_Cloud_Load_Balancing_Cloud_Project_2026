@@ -1,0 +1,462 @@
+================================================================================
+FlashBalanceAI — DEEP REINFORCEMENT LEARNING SPECIFICATION & ARCHITECTURE MANUAL
+Autonomous Cloud Load Balancing Under Extreme Flash-Sale Traffic Surges
+================================================================================
+Document Version : 1.0.0
+Project          : FlashBalanceAI (BCSE355L Capstone 2026)
+Authors          : Devkanti Sarkar, Agrima Gupta, Mohar Gorai
+Source Files     : src/agents/ppo_agent.py
+                   src/agents/dqn_agent.py
+                   src/environment/flash_sale_env.py
+                   src/baselines/round_robin.py
+                   src/baselines/weighted_round_robin.py
+                   src/baselines/least_connections.py
+                   src/baselines/threshold_autoscaler.py
+                   configs/ppo_config.yaml
+                   configs/dqn_config.yaml
+                   decisions/ADR-001.md
+================================================================================
+
+TABLE OF CONTENTS
+-----------------
+1. Executive Overview & Problem Formulation
+2. Agent Inventory: How Many Agents Are There?
+3. Agent Architectures & Operational Mechanics
+   3.1 Primary Autonomous Agent: Proximal Policy Optimization (PPO)
+   3.2 DRL Comparative Baseline Agent: Deep Q-Network (DQN)
+   3.3 Classical Heuristic Dispatcher Agents (Baselines)
+4. Why Did We Choose These Agents? (Comparative Rationale)
+   4.1 Why Reinforcement Learning Over Classical Heuristics?
+   4.2 Why PPO Was Chosen as the Primary Champion Agent
+   4.3 Why DQN Was Chosen as the Primary DRL Baseline
+   4.4 Why Other DRL Architectures (DDPG, H-MAS) Were Rejected
+   4.5 Why These Specific Classical Heuristic Baselines Were Chosen
+5. The Markov Decision Process (MDP) Mathematical Formulation
+   5.1 State Space (Observation Vector s_t in R^23)
+   5.2 Action Space (Discrete Routing Decisions)
+   5.3 Multi-Objective Reward Function Formulation & Weights
+   5.4 Empirical Validation of Reward Weights (Experiment E10 Ablation)
+6. Neural Network Architecture & Hyperparameters
+7. Vectorised Training, Checkpointing & Evaluation Protocol
+8. Real-Time Production Inference Server (Flask & PyTorch on EC2)
+9. Performance Summary & Comparative Benchmarks
+
+================================================================================
+1. EXECUTIVE OVERVIEW & PROBLEM FORMULATION
+================================================================================
+In modern cloud computing environments, high-concurrency e-commerce flash sales
+and sudden breaking-traffic surges generate extreme traffic bursts—often 10x to
+100x baseline request volumes within seconds. Classical cloud load balancers,
+such as AWS Application Load Balancer (ALB) operating standard Round Robin or
+Least Outstanding Requests, are fundamentally stateless and reactive. They dispatch
+incoming HTTP requests without understanding backend CPU queuing dynamics,
+asymmetric hardware degradation, or the looming cliff of tail latency. Under
+sudden surges, this leads to catastrophic request queue hotspots, cascading 
+timeouts (HTTP 504), and Severe Level Agreement (SLA) violations.
+
+FlashBalanceAI solves this challenge by deploying an autonomous Deep Reinforcement
+Learning (DRL) agent that acts as an intelligent, predictive Layer-7 traffic
+dispatcher. The agent observes the real-time telemetry of the entire backend
+server cluster (CPU load, active connections, queue depth, latency moving
+averages, and arrival rate trends) and dynamically routes traffic to preserve
+headroom, balance resource utilization, and eliminate SLA violations.
+
+================================================================================
+2. AGENT INVENTORY: HOW MANY AGENTS ARE THERE?
+================================================================================
+The FlashBalanceAI project evaluates a total of SIX (6) distinct agents across its
+experimental benchmark suite, categorized into Deep Reinforcement Learning agents
+and Classical Heuristic baseline agents:
+
++----+--------------------------+-----------------------+--------------------------------------+
+| #  | Agent Name               | Category              | Operational Role                     |
++----+--------------------------+-----------------------+--------------------------------------+
+| 1  | PPO (Proximal Policy Opt)| Deep RL (Actor-Critic)| Primary Champion Routing Agent       |
+| 2  | DQN (Deep Q-Network)     | Deep RL (Value-Based) | Primary DRL Comparative Baseline     |
+| 3  | Round Robin (RR)         | Classical Heuristic   | Industry Standard Default Ingress    |
+| 4  | Weighted Round Robin(WRR)| Classical Heuristic   | Capacity-Proportional Dispatcher     |
+| 5  | Least Connections (LC)   | Classical Heuristic   | Dynamic Outstanding-Request Balancer |
+| 6  | Threshold Autoscaler(TAS)| Reactive Rule-Based   | CloudWatch 70% CPU Threshold Trigger |
++----+--------------------------+-----------------------+--------------------------------------+
+
+In addition, an optional Random Dispatcher is utilized within the testing suite as
+a theoretical lower bound for routing entropy.
+
+All 6 agents operate on identical backend infrastructure (4 heterogeneous/asymmetric
+EC2 compute nodes) and are subjected to identical synthetic and real-world trace
+traffic spikes to enable strict, scientifically rigorous comparisons.
+
+================================================================================
+3. AGENT ARCHITECTURES & OPERATIONAL MECHANICS
+================================================================================
+
+--------------------------------------------------------------------------------
+3.1 Primary Autonomous Agent: Proximal Policy Optimization (PPO)
+--------------------------------------------------------------------------------
+- Class Implementation: `PPOAgent` in `src/agents/ppo_agent.py`
+- Framework           : Stable-Baselines3 v2.3.0 / PyTorch
+- Learning Paradigm   : On-Policy Actor-Critic with Clipped Surrogate Objective
+
+Operational Mechanics:
+PPO maintains two separate neural networks (or a shared MLP with dual heads):
+1. Actor Network (Policy pi_theta): Takes the 23-dimensional state vector s_t
+   and outputs a probability distribution over the discrete routing actions
+   (softmax over 4 backend servers).
+2. Critic Network (Value Function V_phi): Estimates the expected cumulative
+   discounted return V(s_t) from the current cloud state.
+
+During rollout, the agent collects trajectories of experiences (s_t, a_t, r_t, s_{t+1})
+across vectorised environments. It computes the Generalized Advantage Estimator
+(GAE-lambda) to evaluate whether a selected routing action yielded better-than-average
+results:
+    A_t = sum_{l=0}^{inf} (gamma * lambda)^l * delta_{t+l}^V
+
+To update the policy without causing destructive, unstable policy shifts, PPO
+maximizes the clipped surrogate objective:
+    L^{CLIP}(theta) = E_t [ min( r_t(theta) * A_t,  clip(r_t(theta), 1-eps, 1+eps) * A_t ) ]
+where r_t(theta) = pi_theta(a_t | s_t) / pi_{theta_old}(a_t | s_t) and eps = 0.2.
+
+This clipping mechanism ensures that if an action performed exceptionally well,
+the probability of taking that action cannot increase by more than 20% in a single
+gradient update step. This prevents policy collapse when sudden 10x traffic spikes
+cause massive swings in the reward signal.
+
+--------------------------------------------------------------------------------
+3.2 DRL Comparative Baseline Agent: Deep Q-Network (DQN)
+--------------------------------------------------------------------------------
+- Class Implementation: `DQNAgent` in `src/agents/dqn_agent.py`
+- Framework           : Stable-Baselines3 v2.3.0 / PyTorch
+- Learning Paradigm   : Off-Policy Value-Based RL with Experience Replay & Target Network
+
+Operational Mechanics:
+DQN parameterizes the action-value function Q(s, a; theta) using a multi-layer
+perceptron. Rather than outputting action probabilities directly, it estimates
+the expected return for each of the 4 routing actions and selects the action
+greedily:
+    a_t = argmax_a Q(s_t, a; theta)
+
+Key Components:
+1. Experience Replay Buffer (Capacity = 100,000 transitions): Stores past
+   experience tuples (s_t, a_t, r_t, s_{t+1}). Mini-batches of 64 transitions
+   are sampled uniformly to break temporal correlation in sequential arrivals.
+2. Target Network Q(s, a; theta^-): A frozen copy of the online Q-network updated
+   every 1,000 steps to stabilize the TD-target:
+       Y_t^{DQN} = r_t + gamma * max_{a'} Q(s_{t+1}, a'; theta^-)
+3. Epsilon-Greedy Exploration: Epsilon decays from 1.0 down to 0.05 over the first
+   15% of training steps (300,000 steps), allowing extensive exploratory routing
+   before settling into deterministic exploitation.
+
+--------------------------------------------------------------------------------
+3.3 Classical Heuristic Dispatcher Agents (Baselines)
+--------------------------------------------------------------------------------
+
+1. Round Robin (`RoundRobin` in `src/baselines/round_robin.py`):
+   - Mechanism: Dispatches requests sequentially in cyclic order:
+       Target = (Step Index) mod N
+   - Limitation: Completely blind to backend CPU load and queue buildup. Under
+     asymmetric server capacities (e.g., Node 0 handling 200 conns while Node 1
+     handles only 50 conns), Round Robin sends exactly equal traffic to both,
+     driving weaker nodes into immediate queue saturation and HTTP 504 timeouts.
+
+2. Weighted Round Robin (`WeightedRoundRobin` in `src/baselines/weighted_round_robin.py`):
+   - Mechanism: Routes requests according to pre-configured static weights
+     proportional to each server's nominal compute capacity:
+       Weights = [w_0, w_1, w_2, w_3]
+   - Limitation: Performs better than uniform Round Robin under static conditions,
+     but fails when backend tasks have stochastic execution times (heavy vs. light
+     payloads) or when memory pressure slows down a node independently of its CPU.
+
+3. Least Connections (`LeastConnections` in `src/baselines/least_connections.py`):
+   - Mechanism: Inspects the real-time active connection count across all nodes
+     and dispatches the new request to the server with the fewest concurrent requests:
+       Target = argmin_i (Active_Connections_i)
+   - Limitation: Reactive rather than predictive. When a massive 10x spike hits,
+     all servers temporarily have low connections for a few milliseconds; Least
+     Connections fills them simultaneously without accounting for queue ramp-up
+     or historical latency trends.
+
+4. Threshold Autoscaler (`ThresholdAutoscaler` in `src/baselines/threshold_autoscaler.py`):
+   - Mechanism: Emulates standard AWS CloudWatch Alarm scaling. Routes via Round
+     Robin while monitoring average cluster CPU. If CPU exceeds 70% for two
+     consecutive observation windows, it triggers an ASG scale-out event.
+   - Limitation: CloudWatch metrics have a 1-to-5 minute aggregation lag. In an
+     e-commerce flash sale that peaks in 10 seconds, the scale-out event triggers
+     long after thousands of requests have already timed out and failed.
+
+================================================================================
+4. WHY DID WE CHOOSE THESE AGENTS? (COMPARATIVE RATIONALE)
+================================================================================
+
+--------------------------------------------------------------------------------
+4.1 Why Reinforcement Learning Over Classical Heuristics?
+--------------------------------------------------------------------------------
+Classical load balancers operate under the assumption of steady-state Poisson
+arrivals and homogeneous task service times. In real-world cloud architectures,
+flash sales violate both assumptions:
+1. Arrival distributions exhibit non-stationary, heavy-tailed Pareto bursts.
+2. Backend instances experience asymmetric degradation (thermal throttling,
+   garbage collection pauses, thread pool starvation).
+
+Reinforcement Learning provides a closed-loop feedback controller. By continuously
+observing cluster states and receiving rewards tied directly to SLA compliance
+and latency, a DRL agent learns proactive dispatching policies—such as routing
+traffic away from a server whose queue is starting to back up *before* it breaches
+the 200 ms SLA threshold.
+
+--------------------------------------------------------------------------------
+4.2 Why PPO Was Chosen as the Primary Champion Agent
+--------------------------------------------------------------------------------
+PPO was selected as the core architecture of FlashBalanceAI based on the following
+critical technical criteria (formalized in ADR-001 Decision D1):
+
+1. Resilience Against Policy Collapse:
+   During flash-sale spikes, arrival rates jump from 100 RPS to 1,000+ RPS. In
+   unconstrained policy gradient methods (e.g., REINFORCE or standard TRPO),
+   such high-variance reward feedback causes catastrophic policy degradation
+   where the agent suddenly loses all previously learned behavior. PPO's clipped
+   surrogate objective (clip ratio eps = 0.2) strictly prevents destructive policy updates.
+
+2. On-Policy Headroom Sensitivity:
+   Because PPO evaluates trajectories generated by its current policy, it learns
+   fine-grained balance between immediate throughput and future queue headroom.
+
+3. Sample Efficiency and Vectorised Scalability:
+   PPO achieves state-of-the-art sample efficiency on continuous state spaces
+   with discrete actions. Stable-Baselines3 allows seamless multi-threaded
+   vectorised environments (n_envs = 4), enabling 2,000,000 training timesteps
+   to execute in under 3.5 hours on standard compute.
+
+4. Empirical Validation in Cloud Literature:
+   Prior research (Funika et al. 2023, Femminella & Reali 2024) demonstrated
+   that PPO outperforms competing algorithms in cloud resource scheduling and
+   network traffic orchestration.
+
+--------------------------------------------------------------------------------
+4.3 Why DQN Was Chosen as the Primary DRL Baseline
+--------------------------------------------------------------------------------
+DQN was explicitly selected to resolve Research Gap G3 (identified in PRD Section 3.0):
+"Evaluating on-policy Actor-Critic (PPO) versus off-policy Q-Learning (DQN) in
+production cloud load balancing under extreme non-stationary burst dynamics."
+
+Key Reasons for Benchmarking Against DQN:
+1. Off-Policy Replay Buffer Dilemma: DQN relies on historical transitions stored
+   in its 100,000-step replay buffer. During a sudden 10x flash-sale onset, 95%
+   of the replay buffer contains calm, baseline-traffic transitions. As a result,
+   DQN updates its Q-values based on obsolete traffic conditions, leading to slow
+   adaptation and high tail latencies during the critical initial spike onset.
+2. Overestimation Bias: Standard DQN tends to overestimate Q-values for actions
+   that happened to receive high rewards, occasionally locking into a single
+   overloaded server until TD-error catches up.
+3. Fair Structural Parity: To ensure rigorous scientific comparison, DQN was
+   configured with the EXACT same neural network architecture [64, 64] and trained
+   over the exact same 2,000,000 timesteps using identical random seeds.
+
+--------------------------------------------------------------------------------
+4.4 Why Other DRL Architectures (DDPG, H-MAS) Were Rejected
+--------------------------------------------------------------------------------
+During the Phase-0 Architectural Review (documented in ADR-001 Decision D3), two
+competing reinforcement learning approaches were evaluated and deliberately rejected:
+
+1. Rejection of DDPG (Deep Deterministic Policy Gradient):
+   - Mismatch with Discrete Action Space: DDPG is inherently designed for continuous
+     action spaces (e.g., continuous robotic actuator torques). Load balancing
+     among discrete physical EC2 servers {0, 1, 2, 3} requires discretizing DDPG
+     or applying Gumbel-Softmax approximations, which introduces severe variance.
+   - High Hyperparameter Fragility: DDPG is notoriously sensitive to learning
+     rates and Ornstein-Uhlenbeck noise tuning.
+   - Conclusion: PPO provides natural discrete categorical policy sampling
+     without action-space conversion overhead.
+
+2. Rejection of H-MAS (Hierarchical Multi-Agent Systems):
+   - Excessive Cloud Overhead: Deploying a two-tier hierarchy (local server agents
+     plus a global coordinator agent) requires cross-agent message passing and
+     coordination synchronization. In sub-100ms load balancing, inter-agent RPC
+     delays create latency bottlenecks.
+   - Preservation of Novelty via Feature Engineering: The primary theoretical
+     benefit of H-MAS—filtering high-frequency noise and detecting macro burst
+     regimes—was elegantly integrated into our single PPO agent via the dedicated
+     `burst_indicator` and `time_since_last_spike` state features in the MDP.
+
+--------------------------------------------------------------------------------
+4.5 Why These Specific Classical Heuristic Baselines Were Chosen
+--------------------------------------------------------------------------------
+1. Round Robin: The default routing algorithm in AWS Application Load Balancer
+   and NGINX. Essential baseline to prove the commercial necessity of AI routing.
+2. Weighted Round Robin: Demonstrates that static capacity-aware weighting is
+   insufficient when request processing loads vary stochastically.
+3. Least Connections: The industry standard dynamic alternative available in AWS
+   ALB (Target Group attribute: "Least Outstanding Requests").
+4. Threshold Autoscaler: Represents the current state-of-the-art enterprise
+   architecture (ALB + CloudWatch Alarm + AWS Auto Scaling Group). It directly
+   benchmarks proactive AI dispatching against reactive cloud autoscaling.
+
+================================================================================
+5. THE MARKOV DECISION PROCESS (MDP) MATHEMATICAL FORMULATION
+================================================================================
+The autonomous load balancing problem is formally modeled as an MDP: (S, A, P, R, gamma).
+
+--------------------------------------------------------------------------------
+5.1 State Space (Observation Vector s_t in R^23)
+--------------------------------------------------------------------------------
+For an active backend server cluster of N = 4 instances, the observation vector
+contains exactly 23 continuous features (formula: 5N + 3):
+
+    s_t = [
+      # 1. Per-Backend Telemetry Features (5 features * 4 instances = 20 dims):
+      cpu_util[0..3],       # Real-time CPU utilization (0.0 to 1.0)
+      active_conn[0..3],    # Active TCP/HTTP connection count (normalized)
+      queue_depth[0..3],    # Pending request queue length on each instance
+      resp_time_ema[0..3],  # Exponential Moving Average of response latency (norm 0-1)
+      health_status[0..3],  # Health check state: 1.0 = Healthy, 0.0 = Unhealthy
+
+      # 2. Cluster Macro Features (3 dims):
+      arrival_rate_norm,    # Ingress RPS normalized by baseline (e.g. 1.0 = base, 10.0 = burst)
+      burst_indicator,      # Binary flag: 1.0 if arrival_rate_norm > 2.0, else 0.0
+      time_since_last_spike # Elapsed seconds since last traffic onset (normalized)
+    ]
+
+--------------------------------------------------------------------------------
+5.2 Action Space (Discrete Routing Decisions)
+--------------------------------------------------------------------------------
+At each 100 ms time step, the agent observes s_t and selects a discrete action:
+    a_t in A = {0, 1, 2, 3}
+Action a_t designates the target backend EC2 instance that receives the incoming
+batch of requests during that interval.
+
+--------------------------------------------------------------------------------
+5.3 Multi-Objective Reward Function Formulation & Weights
+--------------------------------------------------------------------------------
+The scalar reward R(t) balances latency reduction, cluster utilization harmony,
+system throughput, and strict SLA guardrails:
+
+    R(t) = w_1 * R_lat(t) + w_2 * R_util(t) + w_3 * R_tput(t) + w_4 * R_sla(t)
+
+Where:
+1. Latency Component (R_lat, w_1 = 0.40):
+   Rewards sub-200ms response times and penalizes latency growth:
+       R_lat(t) = max(0.0, 1.0 - (mean_response_time_ms / 200.0))
+
+2. Utilization Harmony (R_util, w_2 = 0.20):
+   Encourages keeping backend servers within an optimal 70% target utilization
+   band without overloading any single node:
+       R_util(t) = mean_cpu_util - |mean_cpu_util - 0.70|
+
+3. Throughput Compliance (R_tput, w_3 = 0.20):
+   Rewards successfully completed requests relative to expected step capacity:
+       R_tput(t) = min(1.0, total_processed / max_expected_capacity)
+
+4. SLA Guardrail Penalty (R_sla, w_4 = 0.20):
+   Severe penalty against tail latency spikes exceeding the 200 ms SLA boundary:
+       R_sla(t) = 1.0 - (sla_violations / max(1, total_processed))
+
+Locked Reward Weights: (w_1, w_2, w_3, w_4) = (0.40, 0.20, 0.20, 0.20)
+
+--------------------------------------------------------------------------------
+5.4 Empirical Validation of Reward Weights (Experiment E10 Ablation)
+--------------------------------------------------------------------------------
+In Experiment E10 (Ablation Study across 25 weight permutations under a 10x burst),
+the baseline configuration (0.40, 0.20, 0.20, 0.20) was empirically validated:
+- Optimal P95 Latency: Achieved 100.55 ms (lowest across all tested combinations).
+- Hypothesis H7 Confirmation: Removing the SLA penalty (w_4 = 0) resulted in a
+  +26.28% surge in P99 tail latency (from 105.01 ms to 132.61 ms), proving that
+  explicit SLA penalization is critical for taming flash-sale tail latency.
+- Removing Latency (w_1 = 0): Caused severe degradation, ballooning P95 latency to 298.75 ms.
+- Removing Utilization (w_2 = 0): Caused severe server imbalance (variance sigma = 0.0503
+  vs 0.0060, an 8x increase in load imbalance).
+
+================================================================================
+6. NEURAL NETWORK ARCHITECTURE & HYPERPARAMETERS
+================================================================================
+To ensure absolute fairness between PPO and DQN, both models utilize an identical
+Multi-Layer Perceptron (MLP) architecture:
+
+Architecture Specification:
+- Input Dimension       : 23 (MDP state vector)
+- Hidden Layers         : 2 dense layers
+- Hidden Layer Sizes    : [64, 64]
+- Activation Functions  : ReLU (Rectified Linear Unit)
+- Actor Output (PPO)    : Categorical Softmax distribution over 4 actions
+- Critic Output (PPO)   : Single scalar estimate V(s)
+- Q-Network Output (DQN): 4 continuous Q-values Q(s, a)
+
+Hyperparameters Summary Table:
++------------------------------------+--------------------+--------------------+
+| Hyperparameter                     | PPO Agent          | DQN Baseline       |
++------------------------------------+--------------------+--------------------+
+| Learning Rate (Adam)               | 0.0003 (3e-4)      | 0.0001 (1e-4)      |
+| Total Environment Steps            | 2,000,000          | 2,000,000          |
+| Mini-Batch Size                    | 64                 | 64                 |
+| Discount Factor (gamma)            | 0.99               | 0.99               |
+| GAE Lambda (lambda)                | 0.95               | N/A                |
+| PPO Clip Range (epsilon)           | 0.20               | N/A                |
+| Number of Epochs per Rollout       | 10                 | N/A                |
+| Rollout Buffer Size (per env)      | 2048 steps         | N/A                |
+| Replay Buffer Capacity             | N/A                | 100,000 steps      |
+| Target Network Update Interval     | N/A                | 1,000 steps        |
+| Epsilon Exploration Decay          | N/A                | 1.0 -> 0.05 (15%)  |
+| Parallel Environments (VecEnv)     | 4                  | 1                  |
+| Checkpoint Frequency               | 100,000 steps      | 100,000 steps      |
++------------------------------------+--------------------+--------------------+
+
+================================================================================
+7. VECTORISED TRAINING, CHECKPOINTING & EVALUATION PROTOCOL
+================================================================================
+1. Seed Splitting Protocol (Zero Data Leakage):
+   - Training Seeds   : 42 to 111 (70 random seeds)
+   - Validation Seeds : 112 to 126 (15 random seeds, used for checkpoint selection)
+   - Test Seeds       : 127 to 141 (15 locked seeds, evaluated only after training)
+
+2. Vectorised Multi-Environment Training:
+   PPO utilizes `DummyVecEnv` with 4 concurrent environment instances running in
+   parallel. Each environment simulates a continuous flash-sale episode with
+   stochastic Poisson arrivals and random phase onset.
+
+3. Evaluation & Checkpoint Callbacks:
+   - Checkpoints saved every 100,000 steps to `models/ppo/`.
+   - `EvalCallback` runs every 50,000 steps across the 15 validation seeds.
+   - The final production model (`best_model.zip`) is selected based on the highest
+     mean episodic reward across validation seeds.
+
+================================================================================
+8. REAL-TIME PRODUCTION INFERENCE SERVER (FLASK & PYTORCH ON EC2)
+================================================================================
+For live cloud deployment, the trained PPO policy is served via a dedicated
+microservice deployed on an independent EC2 instance (`FlashBalanceAI-InferenceServer`):
+
+- Implementation File : `src/aws/inference_server.py`
+- Listening Port      : Port 6000 (HTTP JSON REST API)
+- Security Boundary   : Locked to private VPC (`10.0.0.0/16`)
+- Inference Endpoint  : POST /predict
+  - Request Payload   : `{"state": [0.45, 0.32, ..., 0.0]}` (23 floats)
+  - Processing        : PyTorch forward pass with `torch.no_grad()`
+  - Response Payload  : `{"action": 2, "probabilities": [0.1, 0.1, 0.7, 0.1], "latency_ms": 3.8}`
+
+Forward pass latency is strictly sub-5ms on standard CPU, ensuring that routing
+decisions never introduce perceptible latency into the HTTP request data path.
+
+================================================================================
+9. PERFORMANCE SUMMARY & COMPARATIVE BENCHMARKS
+================================================================================
+Under the 10x Flash-Sale Burst Scenario (E2: 1,000 RPS burst):
+
++--------------------------+-----------------+-------------------+--------------------+
+| Algorithm                | P95 Latency(ms) | Throughput (RPS)  | SLA Violations (%) |
++--------------------------+-----------------+-------------------+--------------------+
+| PPO (Champion Agent)     | 62.4 ms         | 988.4 RPS         | 0.00 %             |
+| DQN (DRL Baseline)       | 118.2 ms        | 942.1 RPS         | 4.12 %             |
+| Least Connections        | 145.7 ms        | 915.0 RPS         | 8.45 %             |
+| Weighted Round Robin     | 182.3 ms        | 870.2 RPS         | 14.20 %            |
+| Round Robin (AWS Default)| 248.9 ms        | 812.6 RPS         | 26.85 %            |
+| Threshold Autoscaler     | 210.5 ms        | 840.1 RPS         | 19.30 %            |
++--------------------------+-----------------+-------------------+--------------------+
+
+Key Research Conclusions:
+1. PPO achieves a 74.9% reduction in P95 latency compared to standard Round Robin.
+2. PPO completely eliminates SLA violations (0.00%) under the 10x surge, whereas
+   Round Robin violates SLAs on over 26% of all incoming requests.
+3. PPO significantly outperforms DQN (62.4 ms vs 118.2 ms) due to on-policy
+   adaptability and the absence of replay-buffer lag during sudden traffic shifts.
+
+================================================================================
+End of Document — FlashBalanceAI DRL Specification
+================================================================================

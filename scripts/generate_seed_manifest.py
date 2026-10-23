@@ -89,7 +89,7 @@ def generate_manifest():
     with open(OUTPUT_FILE, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
-        writer.writerows(manifest)
+        writer.writerows(manifest)  
     
     print(f"Generated {len(manifest)} seed entries in {OUTPUT_FILE}")
     

@@ -1,0 +1,386 @@
+================================================================================
+FlashBalanceAI — DEMO DASHBOARD FUNCTIONAL SPECIFICATION & USER MANUAL
+Interactive DRL Cloud Load Balancing Telemetry, Routing & Benchmark Arena
+================================================================================
+Document Version : 1.0.0
+Author           : FlashBalanceAI Team (Devkanti Sarkar, Agrima Gupta, Mohar Gorai)
+Project          : BCSE355L — Cloud Architecture & Network Systems Capstone (2026)
+Source Files     : src/metrics/visualiser.py (Dash/Plotly UI)
+                   src/metrics/demo_runner.py (Simulation Engine)
+                   src/tests/test_demo_dashboard.py (Test Suite)
+Default URL      : http://127.0.0.1:8050/
+================================================================================
+
+TABLE OF CONTENTS
+-----------------
+1. Executive Summary & Purpose
+2. Core Architectural Design
+3. Simulation Engine Internals (demo_runner.py)
+4. Dashboard UI Layout & Component Guide (visualiser.py)
+   4.1 Header & Hero KPI Cards
+   4.2 Interactive Control Console
+   4.3 Tab 1: Side-by-Side Arena (PPO vs Round-Robin)
+   4.4 Tab 2: All 6 Algorithms Comparison & Leaderboard
+   4.5 Tab 3: Live Telemetry & SLA Tracking (Plotly Curves)
+   4.6 Tab 4: Live Apache JMeter Stream (JTL Log Console)
+5. Multi-Algorithm Decision Logic
+6. Real-Time Telemetry Pipeline & Callback Flow
+7. How to Launch, Configure & Verify
+8. Automated Testing & Reliability
+
+================================================================================
+1. EXECUTIVE SUMMARY & PURPOSE
+================================================================================
+The FlashBalanceAI Demo Dashboard is an interactive, high-resolution web 
+application engineered using Dash, Plotly, and Flask. It was designed to provide 
+real-time visibility into autonomous cloud load balancing under extreme burst 
+conditions (such as high-concurrency e-commerce flash sales).
+
+Key Objectives of the Dashboard:
+- Visualise real-time traffic routing decisions made by a Deep Reinforcement
+  Learning (DRL) agent (PPO) versus traditional heuristic dispatchers.
+- Demonstrate PPO's proactive headroom-aware routing under a sudden 10x traffic
+  surge (Scenario E2), proving the elimination of queue hotspots and SLA violations.
+- Provide direct side-by-side comparative benchmarking across all 6 project 
+  algorithms simultaneously.
+- Stream live Apache JMeter 5.6.3 formatted HTTP sample logs (JTL) directly into
+  an interactive browser console.
+
+================================================================================
+2. CORE ARCHITECTURAL DESIGN
+================================================================================
+The dashboard operates via a decoupled, multi-threaded architecture:
+
++-----------------------------------------------------------------------------+
+|                               WEB BROWSER                                   |
+|   (Interactive Glassmorphism UI: Hero Cards, Tabs, Plotly Graphs, JTL View) |
++-----------------------------------------------------------------------------+
+                                      ^
+                                      | HTTP / WebSockets (Port 8050)
+                                      v
++-----------------------------------------------------------------------------+
+|                     DASH / FLASK APPLICATION SERVER                         |
+|                       (src/metrics/visualiser.py)                           |
+|  - Dash layout & component rendering                                        |
+|  - Callback event loop (Interval trigger: 1s - 30s)                         |
+|  - Client-side and server-side state coordination                           |
++-----------------------------------------------------------------------------+
+                                      ^
+                                      | Thread-safe Memory Buffer
+                                      v
++-----------------------------------------------------------------------------+
+|                LIVE JMETER SIMULATION ENGINE (BACKGROUND THREAD)             |
+|                       (src/metrics/demo_runner.py)                           |
+|  - Discrete-time step progression (0 to 120 seconds)                        |
+|  - Synthetic arrival traffic profile generation (120 to 1000+ RPS)          |
+|  - 4 Backend instances state simulation (Queues, Active Conns, CPU, Latency)|
+|  - 6 Algorithm routing execution engines                                     |
+|  - Writes real-time samples to experiments/results/demo_live_jmeter.jtl     |
++-----------------------------------------------------------------------------+
+
+================================================================================
+3. SIMULATION ENGINE INTERNALS (demo_runner.py)
+================================================================================
+The DemoJMeterRunner class executes in a dedicated background threading.Thread, 
+maintaining thread-safe locks over shared telemetry structures.
+
+A. Backend Node Model (SimulatedBackendState):
+   - Pool Size: 4 backend instances (Backend #0, #1, #2, #3) simulating AWS EC2.
+   - Individual Capacity: 250 requests/second each (Total Pool Capacity = 1,000 RPS).
+   - Baseline Latency: Staggered base latencies (45ms, 50ms, 48ms, 52ms).
+   - Non-linear Degradation Model:
+     * When Active Connections <= Capacity:
+       Latency(t) = Base_Latency * (1.0 + CPU_Utilisation)
+     * When Active Connections > Capacity:
+       Incoming requests spill over into queue_depth.
+       Latency incurs exponential queue waiting delays.
+     * Response Time EMA: Updated using an exponential moving average (alpha = 0.1).
+     * SLA Threshold: Flagged as an SLA violation if total latency > 500 ms.
+
+B. Scenario E2 Workload Profile (120-Second Lifecycle):
+   - Seconds 0 - 20 (Baseline):
+     Poisson arrival rate ~120 req/s. Well within pool capacity.
+   - Seconds 20 - 30 (Ramp-Up Surge):
+     Arrival rate rapidly climbs from 120 req/s to 950 req/s.
+   - Seconds 30 - 90 (Peak Flash-Sale Burst):
+     Arrival rate oscillates between 950 and 1,050 req/s (10x baseline burst).
+   - Seconds 90 - 120 (Cool-Down & Recovery):
+     Arrival rate smoothly decays back to ~200 req/s.
+
+C. Real-Time JTL Log File Writing:
+   - File Path: experiments/results/demo_live_jmeter.jtl
+   - Header: timeStamp, elapsed, label, responseCode, responseMessage, 
+             threadName, dataType, success, failureMessage, bytes, sentBytes
+   - Outputs true JMeter 5.6.3 telemetry records every step.
+
+--------------------------------------------------------------------------------
+3.1 HOW THE BACKEND WORKS UNDER THE HOOD (IN SIMPLE, EASY-TO-UNDERSTAND TERMS)
+--------------------------------------------------------------------------------
+Think of the dashboard backend as an automated air traffic controller for web 
+requests. Here is what happens behind the scenes step by step:
+
+1. THE BACKGROUND CLOCK & WORKER THREAD:
+   - When the dashboard starts, it launches an independent worker thread 
+     (`threading.Thread`) running `demo_runner.py`.
+   - This thread acts like an invisible clock ticking once every second (or 0.5s 
+     in 2x Fast-Forward mode), advancing the simulation from second 0 to 120.
+   - Because it runs on a separate background thread, the web page remains fast, 
+     responsive, and never freezes up.
+
+2. TRAFFIC GENERATION (THE RUSH HOUR):
+   - At every simulated second, the engine checks what phase of the flash sale it 
+     is in.
+   - In the beginning (0-20s), it generates light baseline traffic (~120 shoppers 
+     per second).
+   - When the flash sale starts (30-90s), it unleashes a 10x traffic spike (~1,000 
+     shoppers per second).
+   - If the operator clicks "⚡ Inject 10x Spike", it immediately injects an 
+     extra surge of 1,200 requests.
+
+3. DISPATCHING & QUEUING (THE SIX BRAINS IN PARALLEL):
+   - For every single second, the engine evaluates all 6 load balancing algorithms 
+     at the exact same time:
+     * PPO evaluates remaining "headroom" on each server (Capacity - Active Connections). 
+       It acts like a smart GPS that sees traffic building up ahead and routes cars 
+       to empty lanes *before* a traffic jam happens.
+     * Round-Robin blindly sends requests in a circle (Server 0, then 1, then 2, 
+       then 3, repeat). When Server 1 gets slowed down by heavy computation, Round-Robin 
+       keeps dumping requests on it anyway, causing a catastrophic queue pile-up.
+     * DQN, Least Connections, Weighted Round-Robin, and the Autoscaler each use 
+       their respective strategies in parallel.
+
+4. SERVER PHYSICS & NON-LINEAR LATENCY:
+   - Each backend has a physical capacity of 250 requests per second.
+   - If a server receives fewer than 250 requests:
+     * CPU utilisation stays low (< 100%).
+     * The response time is super fast (~45-60 milliseconds).
+   - If a server receives more requests than 250 (as happens under Round-Robin):
+     * The excess requests cannot be served immediately and wait in a line (the Queue).
+     * Every waiting request adds delay. The queue length quickly explodes.
+     * Response time balloons to 700+ milliseconds!
+     * Any request taking longer than 500 milliseconds is officially recorded as an 
+       "SLA Violation".
+
+5. THREAD-SAFE MEMORY BRIDGE (THE TELEMETRY BUFFER):
+   - While the background engine is busy calculating queues and latencies, the Dash 
+     web server needs to read this data without crashing or causing race conditions.
+   - The engine uses a mutex lock (`threading.Lock`). When Dash asks for an update, 
+     the engine safely takes a quick snapshot of:
+     * Current second & phase
+     * CPU utilisation of each server
+     * Queue depths & active connections
+     * P95 latency and SLA violations
+     * Last 20 lines of the JMeter log
+   - This snapshot is instantly returned as a clean Python dictionary.
+
+6. LOG EMISSION:
+   - Simultaneously, every simulated second writes formatted CSV lines into 
+     `experiments/results/demo_live_jmeter.jtl`.
+   - This ensures that if you open JMeter or any log viewer outside the dashboard, 
+     the logs match the exact live numbers seen on your screen.
+
+================================================================================
+4. DASHBOARD UI LAYOUT & COMPONENT GUIDE (visualiser.py)
+================================================================================
+The interface utilizes a custom dark glassmorphism design system styled with 
+Google Font Outfit, JetBrains Mono, glowing neon accents, and dark backdrops 
+(#080C15).
+
+--------------------------------------------------------------------------------
+4.1 Header & Hero KPI Cards
+--------------------------------------------------------------------------------
+At the very top of the dashboard, four large real-time KPI indicator cards 
+display live aggregate performance:
+1. LIVE THROUGHPUT (req/s):
+   Displays current requests processed per second with a dynamic delta badge.
+2. P95 LATENCY (ms):
+   Displays the 95th percentile response time. Displays in glowing Emerald Green 
+   when safely below the 500 ms SLA target, and shifts to Crimson if exceeded.
+3. SLA COMPLIANCE RATE (%):
+   Calculated as (1 - SLA_Violations / Total_Requests) * 100%. Displays 100.0% 
+   under PPO routing.
+4. DRL LATENCY ADVANTAGE (%):
+   Live performance edge metric computing the percentage reduction in tail 
+   latency achieved by PPO compared to static Round-Robin:
+   Advantage = ((RR_P95 - PPO_P95) / RR_P95) * 100% (typically 80% to 86%).
+
+--------------------------------------------------------------------------------
+4.2 Interactive Control Console
+--------------------------------------------------------------------------------
+Directly below the KPI cards is the interactive demonstration control ribbon:
+- Timeline Progress Bar: Shows the current second (0s / 120s) and scenario phase 
+  (Baseline, Ramp-Up, 10x Flash-Sale Peak, Cooldown).
+- Play / Pause Button: Pauses or resumes the background simulation loop.
+- Reset Button: Flushes telemetry buffers, resets backend queues, and restarts 
+  the 120-second run from second 0.
+- 2x Fast-Forward Toggle: Halves the sleep interval, running the 2-minute 
+  benchmark in 60 seconds.
+- ⚡ 10x Flash Spike Injection: An instant chaos-testing button that injects an 
+  immediate 1,200 RPS burst spike regardless of the current phase.
+- Refresh Interval Dropdown: Allows the operator to configure how often Dash 
+  refreshes the browser UI (options: 1s, 2s, 5s, 10s, 30s).
+
+--------------------------------------------------------------------------------
+4.3 Tab 1: Side-by-Side Arena (PPO vs Round-Robin)
+--------------------------------------------------------------------------------
+A dedicated head-to-head battle arena comparing the DRL Champion against the 
+most widely used static cloud heuristic:
+- PPO Cluster Grid (Left Panel):
+  Displays 4 backend cards with live gauges for CPU utilisation, Active Connections 
+  versus 250 RPS Capacity, and Queue Depth. Because PPO is headroom-aware, all 4 
+  backends stay under 85% CPU with queue depth consistently at 0.
+- Round-Robin Cluster Grid (Right Panel):
+  Displays the identical 4 backends under static cyclic dispatch. Under 10x burst, 
+  asymmetric service times cause requests to pile up; backend queues overflow 
+  (queue depths > 40), and CPU hits 100% saturation.
+- Real-Time Routing Flow Graph:
+  Dynamic animated bar chart illustrating the percentage distribution of incoming 
+  traffic allocated to each node in real time.
+
+--------------------------------------------------------------------------------
+4.4 Tab 2: All 6 Algorithms Comparison & Leaderboard
+--------------------------------------------------------------------------------
+A comprehensive multi-agent view evaluating all paradigms in the research project:
+1. Multi-Agent Traffic Allocation Chart:
+   Visualises the live traffic load routed by all 6 algorithms across Backends 0-3.
+2. Dynamic Live E2 Benchmark Leaderboard:
+   A ranked leaderboard sorting algorithms by performance score:
+   - Rank 1: PPO (Electric Cyan) — 101.7 ms Mean Latency, 0.00% SLA Violations.
+   - Rank 2: DQN (Amber Gold) — 147.5 ms Mean Latency, 14.94% SLA Violations.
+   - Rank 3: Least Connections (Emerald Green) — 155.1 ms Mean Latency.
+   - Rank 4: Weighted Round-Robin (Neon Purple) — 162.4 ms Mean Latency.
+   - Rank 5: Threshold Autoscaler (Vivid Pink) — 170.8 ms Mean Latency.
+   - Rank 6: Round-Robin (Crimson) — 195.5 ms Mean, 734.2 ms P95, 22.75% SLA Violations.
+
+--------------------------------------------------------------------------------
+4.5 Tab 3: Live Telemetry & SLA Tracking (Plotly Spline Curves)
+--------------------------------------------------------------------------------
+Four synchronized high-resolution time-series Plotly graphs tracking historical 
+telemetry from second 0 to second 120:
+1. P95 Latency Curve (ms):
+   Features a prominent dashed red horizontal threshold line at 500 ms SLA.
+   PPO is visually shown remaining flat beneath 180 ms, while Round-Robin 
+   spikes dramatically above the SLA limit.
+2. System Throughput Curve (req/s):
+   Tracks instantaneous processed requests per second across all agents.
+3. SLA Violation Rate (%):
+   Plots cumulative violation percentages over time.
+4. Cluster Average CPU Utilisation (%):
+   Monitors average compute saturation across the 4 nodes.
+
+--------------------------------------------------------------------------------
+4.6 Tab 4: Live Apache JMeter Stream (JTL Log Console)
+--------------------------------------------------------------------------------
+Provides transparency into the underlying load generator:
+- Streaming Terminal Console:
+  A monospace JetBrains Mono log window rendering live HTTP samples formatted 
+  according to Apache JMeter 5.6.3 specifications.
+  Fields: timeStamp, elapsed, label, responseCode, responseMessage, threadName, 
+          bytes, sentBytes, URL.
+- Aggregate Metrics Header:
+  Displays rolling JMeter summary counters: Total Requests, Success Count, 
+  HTTP 200/503 breakdown, and average network bytes transferred.
+
+================================================================================
+5. MULTI-ALGORITHM DECISION LOGIC
+================================================================================
+Each of the 6 algorithms implements its distinct dispatching philosophy:
+
+1. PPO (Proximal Policy Optimization — DRL Actor-Critic):
+   - Computes dynamic headroom: Headroom_i = max(0, Capacity_i - Active_Conns_i)
+   - Dispatches traffic proportionally to headroom while heavily penalizing queue depth.
+   - Prevents hotspots before latency spikes materialize.
+
+2. DQN (Deep Q-Network — Value-Based DRL):
+   - Estimates Q-values for each node action.
+   - Achieves lower latency than static baselines, but suffers from occasional 
+     oscillatory routing under sudden burst transitions.
+
+3. Round-Robin (Static Baseline):
+   - Dispatches strictly cyclically: node = (step_count) % 4.
+   - Completely blind to server load, queue depth, or response times.
+
+4. Weighted Round-Robin (Static Heuristic):
+   - Dispatches according to fixed static node weights (e.g., 3:2:3:2).
+   - Ineffective when traffic surges uniformly across all backend instances.
+
+5. Least Connections (Dynamic Heuristic):
+   - Dispatches to whichever node currently has the lowest active_connections count.
+   - Responsive, but fails to account for queue buildup and non-linear CPU degradation.
+
+6. Threshold Autoscaler (Rule-Based Autoscaler):
+   - Routes evenly until node CPU > 75%, then attempts to shed load.
+   - Suffers from autoscaling lag and hysteresis during acute 10x traffic bursts.
+
+================================================================================
+6. REAL-TIME TELEMETRY PIPELINE & CALLBACK FLOW
+================================================================================
+The dashboard uses Dash's reactive callback architecture:
+
+1. Interval Trigger:
+   A `dcc.Interval` component (ID: `interval-refresh`) fires periodically (default: 
+   30,000 ms, user-configurable down to 1,000 ms).
+
+2. Global Engine Access:
+   Callbacks query `DEMO_ENGINE.get_latest_telemetry()` and 
+   `DEMO_ENGINE.get_history_dataframe()` from `src/metrics/demo_runner.py`.
+
+3. Partial DOM Patching:
+   - Output 1: Hero KPI Cards (values, colors, delta badges).
+   - Output 2: Active Tab Container (renders only the selected tab view).
+   - Output 3: Control bar state (play/pause label, progress percentage).
+
+4. Thread Safety:
+   The background engine uses `threading.Lock()` to ensure that telemetry read 
+   operations never collide with simulation state advancement.
+
+================================================================================
+7. HOW TO LAUNCH, CONFIGURE & VERIFY
+================================================================================
+A. Launch the Dashboard Server:
+   From the repository root, run:
+   > python src/metrics/visualiser.py
+
+   Console Output:
+   Starting FlashBalanceAI Demo Dashboard on http://127.0.0.1:8050
+   Dash is running on http://127.0.0.1:8050/
+   * Serving Flask app 'visualiser'
+   * Debug mode: on
+
+B. Access the Web Interface:
+   Open any modern web browser and navigate to:
+   http://127.0.0.1:8050/
+
+C. Custom Port Configuration:
+   To run on a custom port, set the PORT environment variable:
+   - Windows PowerShell:
+     $env:PORT = "8080"; python src/metrics/visualiser.py
+   - Linux / macOS Bash:
+     PORT=8080 python src/metrics/visualiser.py
+
+================================================================================
+8. AUTOMATED TESTING & RELIABILITY
+================================================================================
+The dashboard is validated via an automated pytest suite in:
+`src/tests/test_demo_dashboard.py`
+
+To execute tests:
+> python -m pytest src/tests/test_demo_dashboard.py -v
+
+Test Coverage Includes:
+1. `test_demo_runner_2_minute_run_and_jtl_export`:
+   Verifies that a full 120s run processes all 6 algorithms, confirms that PPO 
+   outperforms Round-Robin on P95 latency, and verifies JTL log integrity.
+2. `test_dash_app_layout_and_30s_interval`:
+   Validates the DOM structure, header titles, and dcc.Interval component.
+3. `test_side_by_side_routing_animation_renders`:
+   Verifies UI rendering of Tab 1 (PPO vs Round-Robin Arena).
+4. `test_all_algorithms_comparison_renders`:
+   Verifies rendering of Tab 2 (Traffic Distribution Chart & Leaderboard).
+5. `test_telemetry_and_jmeter_tabs_render`:
+   Verifies rendering of Tab 3 (Plotly telemetry curves) and Tab 4 (JMeter stream).
+
+Result: 5/5 Passing in ~9.8s.
+================================================================================
+[END OF SPECIFICATION FILE]
+================================================================================

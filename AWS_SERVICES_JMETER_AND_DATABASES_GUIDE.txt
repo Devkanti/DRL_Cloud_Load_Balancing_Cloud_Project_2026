@@ -1,0 +1,494 @@
+================================================================================
+FlashBalanceAI — AWS SERVICES, APACHE JMETER & DATABASES ARCHITECTURE GUIDE
+Infrastructure, Load Generation, Trace Datasets & Telemetry Storage Manual
+================================================================================
+Document Version : 1.0.0
+Project          : FlashBalanceAI (BCSE355L Capstone 2026)
+Authors          : Devkanti Sarkar, Agrima Gupta, Mohar Gorai
+Source Files     : src/aws/deploy.py
+                   src/aws/inference_server.py
+                   src/aws/inference_coordinator.py
+                   src/aws/scaling_trigger.py
+                   src/aws/dynamo_setup.py
+                   src/aws/dynamo_utils.py
+                   src/aws/s3_setup.py
+                   src/aws/iam_setup.py
+                   src/traffic/traffic_generator.py
+                   dataset/preprocess_alibaba.py
+                   dataset/README.md
+                   decisions/ADR-001.md
+                   decisions/ADR-002.md
+================================================================================
+
+TABLE OF CONTENTS
+-----------------
+1. Executive Summary
+2. AWS Cloud Services Architecture & Selection Rationale
+   2.1 Amazon EC2 (Elastic Compute Cloud) — Compute Nodes
+   2.2 AWS Application Load Balancer (ALB) — Layer-7 Ingress
+   2.3 AWS Auto Scaling Group (ASG) — Elastic Compute Pool
+   2.4 Amazon CloudWatch — Unified Real-Time Telemetry
+   2.5 AWS Lambda & Amazon EventBridge — Serverless Orchestration
+   2.6 Amazon DynamoDB — Low-Latency Audit Trail
+   2.7 Amazon S3 (Simple Storage Service) — Artifact & Model Storage
+   2.8 AWS IAM (Identity & Access Management) — Least-Privilege Security
+   2.9 Cloud Cost Discipline & Deliberately Excluded Services
+3. Apache JMeter 5.6.3 Load Testing Engine
+   3.1 Role & Deployment Topology
+   3.2 JMX Test Plans & Workload Profiles
+   3.3 JTL Sample Logging Specification
+   3.4 Why Apache JMeter Was Chosen Over Locust and k6
+4. Database & Dataset Systems
+   4.1 Alibaba Cloud Cluster Trace v2018 (Real-World Benchmark)
+   4.2 Synthetic Workload Database (FlashSale-Traffic-Synthetic v1.0)
+   4.3 Comparative Synergy: Alibaba Trace vs. Synthetic Workload DB
+   4.4 Amazon DynamoDB Operational Schema & TTL Lifecycle
+5. Complete System Integration & End-to-End Data Path
+
+================================================================================
+1. EXECUTIVE SUMMARY
+================================================================================
+FlashBalanceAI combines production cloud infrastructure on Amazon Web Services (AWS),
+industrial-grade load generation with Apache JMeter 5.6.3, real-world trace data
+from the Alibaba Cluster Trace Program v2018, and an operational NoSQL database on
+Amazon DynamoDB.
+
+This document details every AWS cloud service utilized, the specific rationale for
+its selection over alternatives, the end-to-end load testing methodology powered
+by Apache JMeter, and the dual-database architecture combining Alibaba trace data
+with synthetic flash-sale traffic generators.
+
+================================================================================
+2. AWS CLOUD SERVICES ARCHITECTURE & SELECTION RATIONALE
+================================================================================
+The AWS deployment operates in the `us-east-1` (N. Virginia) region. The infrastructure
+was designed under strict architectural cost discipline (ADR-001 D12, ADR-002) to
+deliver enterprise-grade cloud capabilities within the AWS Free Tier.
+
+--------------------------------------------------------------------------------
+2.1 Amazon EC2 (Elastic Compute Cloud) — Compute Nodes
+--------------------------------------------------------------------------------
+- Provisioned Instances:
+  - 4x Backend Application Servers (`FlashBalanceAI-Backend` in ASG)
+  - 1x Dedicated DRL Inference Server (`FlashBalanceAI-InferenceServer`)
+- Instance Type: `t2.micro` (1 vCPU, 1 GiB RAM, Burstable CPU Credits)
+- Operating System: Ubuntu 22.04 LTS
+
+Why EC2 Was Chosen:
+1. Low-Level Operating System & Telemetry Access: Unlike serverless containers
+   (AWS Fargate or ECS) where OS internals are abstracted, EC2 provides full
+   access to kernel metrics, thread pool saturation, TCP backlog queues, and
+   hardware CPU throttling. This is essential for simulating realistic server stress.
+2. Production Asymmetric Performance: `t2.micro` instances accurately exhibit
+   real-world cloud characteristics, including CPU credit depletion, memory
+   contention, and noisy-neighbor behavior.
+3. Cost Efficiency (Free Tier Compliance): Under AWS Free Tier, users receive 750
+   hours/month of `t2.micro` compute, enabling comprehensive testing with zero
+   direct compute cost when instances are stopped between experiment sessions.
+
+--------------------------------------------------------------------------------
+2.2 AWS Application Load Balancer (ALB) — Layer-7 Ingress
+--------------------------------------------------------------------------------
+- Provisioned Resource: `FlashBalanceAI-ALB` (Internet-facing, Dual-AZ)
+- Target Group       : `FlashBalanceAI-TG` (HTTP Port 5000, Round-Robin / Weighted)
+
+Why AWS ALB Was Chosen:
+1. Native Layer-7 Request-Level Dispatching: Unlike Layer-4 Network Load Balancers
+   (NLBs) which route TCP connections, ALB operates at the HTTP layer, inspecting
+   headers, request paths, and individual HTTP transactions.
+2. Dynamic Weighted Target Routing: ALB natively supports weighted target routing.
+   This provides the exact architectural integration mechanism for our PPO agent:
+   the agent's discrete routing decisions and softmax probabilities are directly
+   translated into target group weights via the AWS ELBv2 API.
+3. Built-In High-Resolution Metrics: ALB automatically publishes crucial metrics
+   to CloudWatch (`TargetResponseTime`, `ActiveConnectionCount`, `RequestCount`,
+   `HTTPCode_Target_5XX_Count`) without requiring custom instrumentation code.
+
+--------------------------------------------------------------------------------
+2.3 AWS Auto Scaling Group (ASG) — Elastic Compute Pool
+--------------------------------------------------------------------------------
+- Provisioned Resource: `FlashBalanceAI-ASG`
+- Scaling Limits     : Min = 2, Desired = 4, Max = 8 instances
+- Subnet Placement   : Multi-AZ across `us-east-1a` and `us-east-1b`
+
+Why AWS ASG Was Chosen:
+1. Benchmark Baseline for Proactive vs. Reactive Scaling: ASG represents standard
+   industry elasticity. In Experiment E7, we directly benchmark FlashBalanceAI's
+   proactive DRL scaling against AWS ASG's standard reactive CloudWatch alarms.
+2. Resilience & Self-Healing: If a backend node crashes due to simulated memory
+   exhaustion during a 100x spike, ASG automatically terminates the unhealthy
+   instance and provisions a fresh replacement node.
+
+--------------------------------------------------------------------------------
+2.4 Amazon CloudWatch — Unified Real-Time Telemetry
+--------------------------------------------------------------------------------
+- Telemetry Streams:
+  - Free Tier Built-In Metrics: EC2 `CPUUtilization`, ALB `TargetResponseTime`,
+    ALB `ActiveConnectionCount`, ALB `RequestCount`.
+  - Custom Metrics (8 metrics): `QueueDepth` and `ResponseTimeEMA` for each of
+    the 4 backend instances.
+
+Why CloudWatch Was Chosen:
+1. Zero-Infrastructure Observability Pipeline: Provides unified, managed aggregation
+   of both hypervisor-level metrics and application-level metrics without requiring
+   an external monitoring cluster (such as Prometheus or Datadog).
+2. Direct MDP State Vector Feeder: CloudWatch telemetry directly populates the
+   23-dimensional observation vector fed into the PPO actor network.
+3. Strict Free Tier Compliance: AWS Free Tier permits 10 custom metrics at zero cost.
+   By deriving connections and arrival rates from ALB's built-in metrics, custom
+   metrics were reduced from 20 down to 8, staying 100% within the free tier.
+
+--------------------------------------------------------------------------------
+2.5 AWS Lambda & Amazon EventBridge — Serverless Orchestration
+--------------------------------------------------------------------------------
+- Provisioned Serverless Functions:
+  1. `state_collector.py`      : Queries CloudWatch and assembles the 23-dim state vector.
+  2. `inference_coordinator.py`: Sends state vector to the EC2 inference server and
+                                 updates ALB target weights.
+  3. `scaling_trigger.py`      : Triggers ASG capacity adjustments during macro bursts.
+- Scheduling: Amazon EventBridge Rule (invoked periodically at 1-minute intervals).
+
+Why Lambda Was Chosen:
+1. Elimination of Idle Compute Overhead: Instead of running a 24/7 coordinator
+   server, Lambda executes purely on-demand, consuming fractions of a second.
+2. Free Tier Generosity: AWS Lambda offers 1,000,000 free requests per month,
+   resulting in $0.00 infrastructure cost for orchestration.
+
+--------------------------------------------------------------------------------
+2.6 Amazon DynamoDB — Low-Latency Audit Trail
+--------------------------------------------------------------------------------
+- Provisioned Table: `routing_decisions`
+- Billing Mode     : `PAY_PER_REQUEST` (On-Demand)
+- Key Schema       : Partition Key `pk` (String), Sort Key `sk` (String)
+- TTL Feature      : Automatic item expiration enabled on `expires_at` attribute
+
+Why DynamoDB Was Chosen:
+1. Microsecond Write Latency: DynamoDB handles high-frequency logging of every
+   routing decision without introducing disk I/O contention on compute nodes.
+2. Zero Maintenance & Zero Idle Cost: In `PAY_PER_REQUEST` mode, DynamoDB costs
+   nothing when no tests are running, unlike provisioned databases like Amazon RDS.
+3. Automated Lifecycle Cleanup via TTL: Telemetry records automatically expire
+   and delete after 7 days via DynamoDB Time-To-Live (TTL), preventing storage bloat.
+
+--------------------------------------------------------------------------------
+2.7 Amazon S3 (Simple Storage Service) — Artifact & Model Storage
+--------------------------------------------------------------------------------
+- Provisioned Bucket: `flashbalanceai-models-380301679239`
+- Key Objects Stored:
+  - Trained PyTorch / Stable-Baselines3 model weights (`best_model.zip`)
+  - Experiment result CSVs and JTL trace logs
+  - Preprocessed Alibaba cluster trace summary tables (`alibaba_summary.csv`)
+
+Why S3 Was Chosen:
+1. High Durability & Versioning: 99.999999999% (11 9s) durability guarantees that
+   trained RL model weights and academic experimental results are never corrupted.
+2. Seamless Decoupled Deployment: The inference server downloads model artifacts
+   directly from S3 during bootstrap initialization.
+
+--------------------------------------------------------------------------------
+2.8 AWS IAM (Identity & Access Management) — Least-Privilege Security
+--------------------------------------------------------------------------------
+- Provisioned IAM Roles:
+  - `FlashBalanceAI-EC2-Role`   : Grants EC2 instances permission to push CloudWatch
+                                  metrics and pull models from S3.
+  - `FlashBalanceAI-Lambda-Role`: Grants Lambda functions permission to query CloudWatch,
+                                  call ELBv2 `ModifyTargetGroup`, and write to DynamoDB.
+
+Why IAM Was Chosen:
+1. Elimination of Hardcoded API Keys: Instances and functions authenticate via
+   temporary AWS STS security tokens assigned to instance profiles.
+2. Principle of Least Privilege: Every role contains narrowly scoped IAM policies
+   restricting access strictly to FlashBalanceAI resources.
+
+--------------------------------------------------------------------------------
+2.9 Cloud Cost Discipline & Deliberately Excluded Services
+--------------------------------------------------------------------------------
+During the Phase-0 architectural cost review (ADR-001 D13 and ADR-002), several
+AWS services were formally evaluated and deliberately excluded:
+
++----------------------+--------------------+---------------------------------------------------+
+| Service Evaluated    | Architectural Role | Reason for Rejection / Exclusion                  |
++----------------------+--------------------+---------------------------------------------------+
+| AWS SageMaker        | Model Training     | Excluded: High hourly cost (~$0.20-$0.50/hr).     |
+|                      |                    | Local CPU & Colab free tier provide faster runs.  |
+| AWS API Gateway      | Ingress API Proxy  | Excluded: Adds unnecessary hops, latency (+15ms), |
+|                      |                    | and $3.50/million request fees. ALB is direct.    |
+| AWS CloudFront       | Edge CDN           | Excluded: CDN caching defeats the purpose of      |
+|                      |                    | stress-testing backend load balancing algorithms. |
+| Amazon RDS / Aurora  | Relational DB      | Excluded: Minimum cost >$15/month for idle DB.   |
+|                      |                    | DynamoDB on-demand fulfills all logging needs.    |
++----------------------+--------------------+---------------------------------------------------+
+
+================================================================================
+3. APACHE JMETER 5.6.3 LOAD TESTING ENGINE
+================================================================================
+
+--------------------------------------------------------------------------------
+3.1 Role & Deployment Topology
+--------------------------------------------------------------------------------
+Apache JMeter 5.6.3 is the primary industrial load generation engine for FlashBalanceAI.
+It runs locally or on a dedicated client machine, generating high-concurrency HTTP
+traffic directed against the AWS ALB ingress endpoint:
+    http://FlashBalanceAI-ALB-1615485785.us-east-1.elb.amazonaws.com/request
+
+Tests are executed in headless CLI mode (`jmeter -n -t ... -l ...`) to ensure that
+GUI rendering does not bottle-neck thread scheduling or distort latency measurements.
+
+--------------------------------------------------------------------------------
+3.2 JMX Test Plans & Workload Profiles
+--------------------------------------------------------------------------------
+The repository maintains four dedicated JMeter test plan configurations in
+`src/traffic/jmeter_configs/`:
+
+1. `flashsale_e2_10x.jmx` (Experiment E2 — Standard Flash-Sale Surge):
+   - Baseline Load : 100 threads generating 100 RPS.
+   - Flash Surge   : Rapid ramp to 1,000 threads generating 1,000 RPS (10x burst).
+   - Duration      : 120 seconds (Warmup -> Ramp -> Peak Surge -> Cooldown).
+
+2. `flashsale_e3_50x.jmx` (Experiment E3 — Severe Flash-Sale Surge):
+   - Peak Surge    : 5,000 RPS burst injected over 10 seconds.
+   - Purpose       : Evaluates algorithm stability under severe queue backpressure.
+
+3. `flashsale_e4_100x.jmx` (Experiment E4 — Catastrophic Surge):
+   - Peak Surge    : 10,000 RPS burst.
+   - Purpose       : Tests graceful degradation and HTTP 504 error mitigation.
+
+4. `flashsale_e6_noisy.jmx` (Experiment E6 — Stochastic Traffic Noise):
+   - Traffic Shape : Base load with Gaussian noise perturbations (sigma = 15%).
+   - Purpose       : Proves the agent does not overreact to harmless micro-fluctuations.
+
+--------------------------------------------------------------------------------
+3.3 JTL Sample Logging Specification
+--------------------------------------------------------------------------------
+JMeter outputs sample logs in CSV-formatted `.jtl` (JMeter Text Log) files:
+- Primary Demo Path: `experiments/results/demo_live_jmeter.jtl`
+- CSV Header Structure:
+  `timeStamp,elapsed,label,responseCode,responseMessage,threadName,dataType,success,failureMessage,bytes,sentBytes,grpThreads,allThreads,URL,Latency,IdleTime,Connect`
+
+Example Log Entries:
+```csv
+1760334812104,42,POST /request,200,OK,Thread Group 1-1,text,true,,1024,312,100,100,http://alb/request,41,0,8
+1760334812148,512,POST /request,504,Gateway Timeout,Thread Group 1-2,text,false,Timeout,256,312,1000,1000,http://alb/request,510,0,12
+```
+
+These raw samples stream directly into the live dashboard console (Tab 4),
+calculating real-time Success Rate (200 OK), Error Count (504 Timeout), and P95 latency.
+
+--------------------------------------------------------------------------------
+3.4 Why Apache JMeter Was Chosen Over Locust and k6
+--------------------------------------------------------------------------------
+During tool evaluation, three industry-standard load testing tools were compared:
+Apache JMeter, Locust (Python), and k6 (Go / JavaScript).
+
+JMeter was selected for the following decisive technical reasons:
+1. Microsecond Timestamp Accuracy: JMeter records millisecond/microsecond connect
+   and response times using native Java NIO threading, whereas Python-based Locust
+   is subject to Python Global Interpreter Lock (GIL) contention under 1,000+ RPS.
+2. Standardized JTL Specification: JMeter's `.jtl` format is the globally accepted
+   benchmark format in cloud systems research, enabling third-party verification.
+3. Precise Constant Throughput Timers: JMeter provides mathematical thread pacing
+   (Constant Throughput Timer and Precise Throughput Timer) to inject exact target
+   RPS profiles matching our experimental designs.
+4. Out-of-the-Box Headless CLI Execution: JMeter integrates seamlessly into automated
+   Bash and PowerShell test pipelines (`jmeter -n -t test.jmx -l results.jtl`).
+
+================================================================================
+4. DATABASE & DATASET SYSTEMS
+================================================================================
+FlashBalanceAI utilizes a dual-database approach to model and test cloud workloads:
+(1) Real-world enterprise cluster data from Alibaba Cloud, and (2) Controllable
+synthetic burst workloads, backed by an operational Amazon DynamoDB audit store.
+
+--------------------------------------------------------------------------------
+4.1 Alibaba Cloud Cluster Trace v2018 (Real-World Benchmark)
+--------------------------------------------------------------------------------
+- Dataset Source: [Alibaba Cluster Trace Program v2018](https://github.com/alibaba/clusterdata)
+- Raw Dataset Scope: Production cluster covering ~4,000 machines over 8 days (~280 GB raw CSVs).
+- Key Source Tables Used:
+  - `machine_usage.csv`: CPU utilization, memory utilization, network I/O, disk I/O.
+  - `batch_instance.csv`: Instance name, task name, job start time, end time, CPU max.
+
+Preprocessing Pipeline (`dataset/preprocess_alibaba.py`):
+1. Chunked Stream Processing: To process massive multi-gigabyte CSVs without memory
+   overflow, files are processed in streaming chunks of 1,000,000 rows.
+2. 100 ms Time-Bin Aggregation: Valid CPU observations are resampled into 100 ms
+   time windows.
+3. Baseline & Burst Extraction:
+   - Median cluster CPU is computed as the baseline.
+   - Contiguous time windows exceeding `5 x baseline` are classified as flash events.
+   - Batch instance start times are resampled to calculate task arrival rates per second.
+4. Output Artifact: `dataset/alibaba_summary.csv`
+   Columns: `event_id, start_time_s, end_time_s, duration_s, baseline_cpu_percent,
+             peak_cpu_percent, burst_multiplier, peak_arrival_rate_per_second, arrival_count`
+
+Role in FlashBalanceAI:
+- Provides empirical proof that multi-fold resource spikes (>10x baseline) occur
+  frequently in production hyperscale cloud clusters.
+- Serves as a realistic workload proxy to validate that synthetic traffic distributions
+  accurately mirror real enterprise data center characteristics.
+- NOTE: The Alibaba trace contains batch workload starts, which serve as an arrival
+  proxy rather than direct end-user HTTP transactions.
+
+--------------------------------------------------------------------------------
+4.2 Synthetic Workload Database (FlashSale-Traffic-Synthetic v1.0)
+--------------------------------------------------------------------------------
+- Implementation File: `src/traffic/traffic_generator.py`
+- Configuration File : `configs/traffic_config.yaml`
+
+The synthetic traffic generator produces high-resolution request arrival time
+series (at 100 ms intervals) structured into five distinct phases:
+
+```
+  Traffic Rate (RPS)
+        |
+  Peak  |                     +-----------------------+  (Phase 4: Peak Burst)
+  Burst |                    /                         \
+        |                   /                           \
+        |                  /                             \  (Phase 5: Cooldown)
+        |         +-------+  (Phase 3: Spike Onset)       \
+  Pre   |         |                                        \
+  Burst |  +------+  (Phase 2: Pre-Burst)                   +--------------+
+  Base  |  |                                                 (Baseline Return)
+        +--+----------------------------------------------------------------- Time
+           Phase 1: Warmup
+```
+
+Five Phased Lifecycle:
+1. Warmup (Steps 0–1200, 120s): Constant baseline traffic (100 RPS). Stabilizes
+   server caches, connection pools, and moving averages.
+2. Pre-Burst (Steps 1200–1800, 60s): Elevated 3x baseline traffic (300 RPS).
+   Simulates shoppers browsing products prior to a scheduled sale.
+3. Spike Onset (Steps 1800–1900, 10s): Steep linear ramp jumping from 300 to 1,000+ RPS.
+   Simulates the exact second the flash-sale checkout opens.
+4. Peak Burst (Steps 1900–4900, 300s): Extreme sustained burst (10x, 50x, or 100x).
+5. Cooldown (Steps 4900–7900, 300s): Exponential decay returning to baseline.
+
+Statistical & Stochastic Realism:
+- Gaussian Perturbation Noise: Adds stochastic variation (sigma = 10% of rate)
+  at each step to simulate real-world request randomness.
+- Heavy-Tailed Job Sizes: Request processing times follow a Pareto distribution,
+  ensuring a mixture of lightweight requests and heavy checkout computations.
+- Strict Seed Partitioning (ADR-001 D18):
+  - Seeds 42–111 (70 seeds)  : Training episodes.
+  - Seeds 112–126 (15 seeds) : Validation episodes.
+  - Seeds 127–141 (15 seeds) : Test episodes (strictly evaluated post-training).
+
+--------------------------------------------------------------------------------
+4.3 Comparative Synergy: Alibaba Trace vs. Synthetic Workload DB
+--------------------------------------------------------------------------------
+Why both datasets are critically necessary:
+
+1. Limitations of Alibaba Trace Alone:
+   - The Alibaba trace CPU metric is capped at 100% and cannot be artificially
+     scaled to test 50x or 100x stress conditions.
+   - It records cluster batch task schedules rather than HTTP Layer-7 requests.
+   - Raw data cannot be deterministically seeded for reproducible controlled tests.
+
+2. Limitations of Synthetic Data Alone:
+   - Purely synthetic data risks academic artificiality if disconnected from
+     real-world cloud telemetry.
+
+3. The Dual Synergy:
+   Alibaba Cloud trace data grounds the statistical distribution (proving the
+   existence and duration of multi-fold bursts), while the Synthetic Workload DB
+   provides precise, deterministic, repeatable HTTP load generation that can be
+   scaled up to 10,000 RPS for extreme stress testing.
+
+--------------------------------------------------------------------------------
+4.4 Amazon DynamoDB Operational Schema & TTL Lifecycle
+--------------------------------------------------------------------------------
+- Implementation: `src/aws/dynamo_setup.py` & `src/aws/dynamo_utils.py`
+- Table Name    : `routing_decisions`
+- Primary Key Structure:
+  - Partition Key (`pk`): String — Formatted as `SESSION#{session_id}` or `SCENARIO#{scenario}`
+  - Sort Key (`sk`)     : String — Formatted as `DECISION#{timestamp_ms}` or `STATE#{timestamp_ms}`
+
+Data Model for Logged Transitions:
+```json
+{
+  "pk": "SESSION#demo-run-2026-10-13",
+  "sk": "DECISION#1760334812104",
+  "step": 420,
+  "action": 2,
+  "action_name": "Backend-Node-2",
+  "state_vector": [0.45, 0.62, 0.38, 0.71, 0.30, 0.55, ...],
+  "mean_cpu": 0.54,
+  "p95_latency_ms": 58.4,
+  "sla_violation_rate": 0.00,
+  "reward": 0.842,
+  "expires_at": 1760939612
+}
+```
+
+TTL Lifecycle:
+The `expires_at` attribute is populated with a UNIX timestamp equal to `current_time + 7 days`.
+Amazon DynamoDB's background engine scans and purges expired items automatically
+with zero compute charges, ensuring that database storage stays perpetually lean.
+
+================================================================================
+5. COMPLETE SYSTEM INTEGRATION & END-TO-END DATA PATH
+================================================================================
+The diagram below illustrates how all cloud services, testing tools, and data stores
+interact during a live load test:
+
+```
+  +-------------------------------------------------------------------------+
+  |                     APACHE JMETER 5.6.3 ENGINE                          |
+  |         (Executes .JMX Test Plans -> Generates High-RPS Traffic)        |
+  +-------------------------------------------------------------------------+
+                                       |
+                                       | HTTP POST /request (100 - 1,000+ RPS)
+                                       v
+  +-------------------------------------------------------------------------+
+  |                   AWS APPLICATION LOAD BALANCER (ALB)                   |
+  |                  (Internet-Facing Ingress on Port 80)                   |
+  +-------------------------------------------------------------------------+
+                        /              |              \
+                       /               |               \
+          Target 0    /     Target 1   |      Target 2  \    Target 3
+                     v                 v                 v
+  +-------------------------------------------------------------------------+
+  |            AWS AUTO SCALING GROUP (4x EC2 t2.micro BACKENDS)            |
+  |            - FlashBalanceAI-Backend Nodes (Flask App on Port 5000)      |
+  |            - Track CPU, Queue Depth, Connections, Response Times        |
+  +-------------------------------------------------------------------------+
+                     |                 |                 |
+                     +-----------------+-----------------+
+                                       |
+                                       | Real-Time Metrics Push
+                                       v
+  +-------------------------------------------------------------------------+
+  |                         AMAZON CLOUDWATCH                               |
+  |        (Aggregates Built-in ALB/EC2 Metrics + 8 Custom Agent Metrics)    |
+  +-------------------------------------------------------------------------+
+                                       |
+                                       | 23-Dimensional State Vector s_t
+                                       v
+  +-------------------------------------------------------------------------+
+  |                DRL INFERENCE SERVER (EC2 t2.micro, Port 6000)           |
+  |        - Trained PyTorch PPO Policy loaded from Amazon S3               |
+  |        - Sub-5ms forward pass selects optimal target backend a_t        |
+  +-------------------------------------------------------------------------+
+                   /                                       \
+                  / Updates ALB Weights                     \ Logs Decisions
+                 v                                           v
+  +-----------------------------+             +-----------------------------+
+  |    AWS ELBv2 TARGET GROUP   |             |       AMAZON DYNAMODB       |
+  | (Dynamic Traffic Weighting) |             | (Audit Trail + 7-Day TTL)   |
+  +-----------------------------+             +-----------------------------+
+```
+
+Summary:
+1. Apache JMeter generates flash-sale traffic based on the synthetic profile.
+2. AWS ALB ingresses traffic and forwards to backend EC2 instances.
+3. Backend EC2 instances process transactions and stream telemetry to CloudWatch.
+4. CloudWatch feeds the 23-dimensional state vector to the EC2 DRL Inference Server.
+5. The PPO model computes the optimal target weights in sub-5ms.
+6. Target group weights are updated dynamically on ALB, steering traffic away from
+   congested queues and eliminating SLA violations.
+7. Every state-action transition is persisted to Amazon DynamoDB for real-time
+   visualization on the FlashBalanceAI Demo Dashboard.
+
+================================================================================
+End of Document — FlashBalanceAI AWS Services, JMeter & Databases Guide
+================================================================================
